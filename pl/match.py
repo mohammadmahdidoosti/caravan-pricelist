@@ -68,7 +68,7 @@ def _brief(o: dict) -> dict:
 
 def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big_pct: float = 20.0,
           use_model: bool = True) -> dict:
-    aliases = {str(k): v for k, v in (aliases or {}).items()}
+    aliases = {str(k): v for k, v in aliases.items()} if isinstance(aliases, dict) else {}   # PHP sends [] when empty
     by_id = {}
     for o in offers:
         o["_wn"] = words_nums(o.get("name", ""))
