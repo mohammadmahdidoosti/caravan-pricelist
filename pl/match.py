@@ -62,8 +62,7 @@ def _pick(row: dict, cands: list[dict]) -> tuple[list[int], float]:
 
 
 def _brief(o: dict) -> dict:
-    return {"offer_id": o.get("offer_id"), "product_id": o.get("product_id"), "variation_id": o.get("variation_id", 0),
-            "name": o.get("name", ""), "toman": o.get("toman")}
+    return {"offer_id": o.get("offer_id"), "name": o.get("name", ""), "toman": o.get("toman")}
 
 
 def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big_pct: float = 20.0,
@@ -118,6 +117,8 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
             pct = (res["toman"] - float(o["toman"])) / float(o["toman"]) * 100
             res["change_pct"] = round(pct, 1)
             res["big"] = abs(pct) > big_pct
+    for res in out:                                      # keep the answer small: a sure row needs no choices
+        res["cands"] = [] if res["status"] == "green" else res["cands"][:5]
     counts = {s: sum(1 for r in out if r["status"] == s) for s in ("green", "yellow", "new")}
     for o in offers:
         o.pop("_wn", None)

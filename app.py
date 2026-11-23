@@ -25,6 +25,7 @@ from pathlib import Path
 
 import requests
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 
 from pl import llm
 from pl.match import match, unmatched_offers
@@ -39,6 +40,7 @@ MAX_BYTES = 30 * 1024 * 1024
 ALLOWED = (".pdf", ".xlsx", ".xlsm", ".csv", ".jpg", ".jpeg", ".png", ".webp")
 
 app = FastAPI(title="Caravan price lists", docs_url=None, redoc_url=None)
+app.add_middleware(GZipMiddleware, minimum_size=1000)   # results reach Iran over a slow line: ~9x smaller
 _lock = threading.Lock()
 
 
@@ -78,7 +80,8 @@ def _run(job: Path, meta: dict) -> None:
         _save(job, {"status": "matching", "progress": 0.85})
         offers = meta.get("offers") or []
         m = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
-        result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": unmatched_offers(m["rows"], offers),
+        miss = unmatched_offers(m["rows"], offers)
+        result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": miss[:300], "not_in_list_count": len(miss),
                   "failed": got["failed"], "pages": got["pages"], "calls": got["calls"],
                   "usd": round(got["usd"] + m["usd"], 4), "model": llm.model()}
         (job / "result.json").write_text(json.dumps(result, ensure_ascii=False))
