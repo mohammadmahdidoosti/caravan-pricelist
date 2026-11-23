@@ -131,8 +131,9 @@ def _infer_units(rows: list[dict]) -> None:
     prices on the site (by a vote over the file), then every unit-less row of that file gets it."""
     votes: dict[str, list[str]] = {}
     for r in rows:
-        if r.get("unit") or not r.get("price") or not r.get("offers") or not r["offers"][0].get("toman"):
-            continue
+        if r.get("unit") or not r.get("price") or r.get("status") != "green" or not r.get("offers") \
+                or not r["offers"][0].get("toman"):
+            continue                                     # only sure matches may vote (a guess must not set the unit)
         cur = float(r["offers"][0]["toman"])
         best, gap = "", 9e9
         for unit in ("toman", "rial", "thousand_toman"):
