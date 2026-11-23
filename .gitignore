@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+data/
+samples/
+*.pdf
+*.xlsx
+*.xlsm
+*.csv
+*.jpg
+*.jpeg
+*.png
+*.webp
