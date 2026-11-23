@@ -13,6 +13,7 @@ independent: this service never touches the site's database and never writes pri
 | | |
 |---|---|
 | `GET /health` | `{"ok": true, "model": "...", "key": true}` |
+| `POST /jobs/pull` | JSON `{meta_url, files:[{url,name}]}`: the service downloads the meta and the files from the site (whose server in Iran cannot upload abroad). Only hosts in `PL_PULL_HOSTS` |
 | `POST /jobs` | multipart: `files` (1–40 × PDF/xlsx/csv/jpg/png/webp, ≤ 30 MB) + `meta` (JSON, below) → `{"id": "..."}` |
 | `GET /jobs/{id}` | status `queued → reading → matching → done / failed`, `progress`, and `result` when done |
 
@@ -38,6 +39,7 @@ status (green|yellow|new), how, offers[] (the match), cands[] (choices), change_
 | `PL_TOKEN` | shared secret with the site — **never in git** |
 | `PL_MODEL` | default `deepseek/deepseek-v4.1-flash` |
 | `PL_DATA_DIR` | default `/data` (mount a volume) |
+| `PL_PULL_HOSTS` | hosts /jobs/pull may download from (default `caravansanat.com`) |
 | `PL_KEEP_DAYS` | uploaded files are deleted after this many days (default 30) |
 
 Supplier files are business data: they stay on the server volume and are git-ignored.

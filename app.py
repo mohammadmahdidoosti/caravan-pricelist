@@ -1,5 +1,7 @@
 """Caravan supplier price lists: a small API for caravansanat.com.
 
+POST /jobs/pull   JSON {"meta_url": "...", "files": [{"url": "...", "name": "list1.pdf"}]}: the service downloads the meta
+                  and the files itself (for a site whose server cannot upload abroad; hosts in PL_PULL_HOSTS)
 POST /jobs        files[] + meta (JSON): {supplier_id, supplier_name, unit_hint, offers: [...], aliases: {key: offer_id},
                   callback_url}  ->  {"id": "<job>"}
 GET  /jobs/<id>   {"status": queued|reading|matching|done|failed, "progress": .., "result": {...}}
@@ -127,6 +129,57 @@ async def create_job(meta: str = Form("{}"), files: list[UploadFile] = File(...)
     _save(job, {"id": jid, "status": "queued", "progress": 0, "created": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "supplier_id": meta_d.get("supplier_id"), "files": len(files), "offers": len(meta_d.get("offers") or [])})
     threading.Thread(target=_run, args=(job, meta_d), daemon=True).start()
+    return {"id": jid}
+
+
+def _pull_ok(url: str) -> bool:
+    hosts = [h.strip().lower() for h in os.environ.get("PL_PULL_HOSTS", "caravansanat.com").split(",") if h.strip()]
+    m = re.match(r"^https://([^/:?#]+)", str(url or ""))
+    return bool(m) and any(m.group(1).lower() == h or m.group(1).lower().endswith("." + h) for h in hosts)
+
+
+def _download(url: str, limit: int) -> bytes:
+    with requests.get(url, timeout=(20, 180), stream=True, headers={"User-Agent": "caravan-pricelist"}) as r:
+        r.raise_for_status()
+        out = b""
+        for chunk in r.iter_content(65536):
+            out += chunk
+            if len(out) > limit:
+                raise ValueError("file too big")
+        return out
+
+
+def _pull_and_run(job: Path, body: dict) -> None:
+    try:
+        _save(job, {"status": "downloading"})
+        meta = json.loads(_download(body["meta_url"], 40 * 1024 * 1024).decode("utf-8"))
+        for i, f in enumerate(body.get("files") or []):
+            name = Path(str(f.get("name") or f"file{i}")).name
+            safe = re.sub(r"[^\w.\-]+", "_", name, flags=re.UNICODE)[-120:]
+            (job / "files" / f"{i:02d}-{safe}").write_bytes(_download(f["url"], MAX_BYTES))
+        (job / "meta.json").write_text(json.dumps({k: v for k, v in meta.items() if k != "offers"}, ensure_ascii=False))
+        _save(job, {"supplier_id": meta.get("supplier_id"), "offers": len(meta.get("offers") or [])})
+    except Exception as e:                               # noqa: BLE001
+        log.warning("pull %s: %s", job.name, e)
+        _save(job, {"status": "failed", "error": f"دریافت فایل از سایت ممکن نشد: {e}"[:300]})
+        return
+    _run(job, meta)
+
+
+@app.post("/jobs/pull")
+async def create_pull_job(body: dict, x_pl_token: str | None = Header(None)):
+    _auth(x_pl_token)
+    files = body.get("files") or []
+    if not _pull_ok(body.get("meta_url", "")) or not files or len(files) > MAX_FILES or \
+            not all(_pull_ok(f.get("url", "")) and Path(str(f.get("name") or "")).suffix.lower() in ALLOWED for f in files):
+        raise HTTPException(status_code=400, detail="bad meta_url or files")
+    _cleanup()
+    jid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:8]
+    job = DATA / jid
+    (job / "files").mkdir(parents=True)
+    _save(job, {"id": jid, "status": "queued", "progress": 0, "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "files": len(files), "pulled": True})
+    threading.Thread(target=_pull_and_run, args=(job, body), daemon=True).start()
     return {"id": jid}
 
 
