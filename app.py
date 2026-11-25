@@ -78,6 +78,7 @@ def _run(job: Path, meta: dict) -> None:
     try:
         files = sorted((job / "files").iterdir())
         _save(job, {"status": "reading", "progress": 0})
+        served0 = dict(llm.SERVED)
         got = read_files(files, meta.get("unit_hint") or "auto",
                          progress=lambda n, t: _save(job, {"progress": round(n / max(t, 1) * 0.8, 2)}))
         _save(job, {"status": "matching", "progress": 0.85})
@@ -87,7 +88,11 @@ def _run(job: Path, meta: dict) -> None:
         miss = unmatched_offers(m["rows"], offers)
         result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": miss[:300], "not_in_list_count": len(miss),
                   "failed": got["failed"], "pages": got["pages"], "calls": got["calls"],
-                  "usd": round(got["usd"] + m["usd"], 4), "model": llm.model()}
+                  "usd": round(got["usd"] + m["usd"], 4), "model": llm.model(),
+                  # where the money went: first reading, second (check) reading, matching; and who answered
+                  "cost": {**got.get("cost", {}), "match": round(m["usd"], 4)},
+                  "served": {k: v - served0.get(k, 0) for k, v in llm.SERVED.items() if v - served0.get(k, 0) > 0},
+                  "provider": ",".join((llm.provider() or {}).get("order", [])) or "auto"}
         (job / "result.json").write_text(json.dumps(result, ensure_ascii=False))
         _save(job, {"status": "done", "progress": 1, "done_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "counts": m["counts"], "usd": result["usd"]})

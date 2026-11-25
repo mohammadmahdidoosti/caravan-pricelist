@@ -244,6 +244,7 @@ def _rows_of(j: dict | None, label: str) -> list[dict]:
 def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dict:
     """Every file -> merged rows. {'rows': [...], 'usd': .., 'calls': .., 'failed': [...], 'pages': ..}"""
     rows, usd, calls, failed, pics = [], 0.0, 0, [], []
+    check_usd = 0.0                                  # the second reading's share of usd
     for f in files:
         low = f.name.lower()
         try:
@@ -281,10 +282,10 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
         k, c2 = llm.ask([{"role": "system", "content": CHECK_SYSTEM},
                          {"role": "user", "content": [{"type": "text", "text": "List every model code and its price."},
                                                       llm.image_part(pic, mime)]}], max_tokens=6000)
-        return label, j, c + c2, k
+        return label, j, c, c2, k
     with ThreadPoolExecutor(4) as ex:
-        for n, (label, j, c, k) in enumerate(ex.map(look, pics), 1):
-            usd, calls = usd + c, calls + 2
+        for n, (label, j, c, c2, k) in enumerate(ex.map(look, pics), 1):
+            usd, calls, check_usd = usd + c + c2, calls + 2, check_usd + c2
             if j is None:
                 failed.append(f"{label}: خوانده نشد")
             got = _rows_of(j, label)
@@ -294,7 +295,8 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
                 progress(n, len(pics))
     _check_with_text(files, rows, unit_hint)
     items = merge(rows, unit_hint)
-    return {"rows": items, "usd": round(usd, 4), "calls": calls, "failed": failed, "pages": len(pics)}
+    return {"rows": items, "usd": round(usd, 4), "calls": calls, "failed": failed, "pages": len(pics),
+            "cost": {"read": round(usd - check_usd, 4), "check": round(check_usd, 4)}}
 
 
 def _digits(p) -> str:
