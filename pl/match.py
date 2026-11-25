@@ -106,7 +106,8 @@ def _rule_pick(row: dict, cands: list[dict]) -> list[dict]:
     _, ln = words_nums(row.get("name") or "")
     if not head or not ln:
         return []
-    same = [o for o in cands if _head(o.get("name", "")).startswith(head.split()[0]) and o["_wn"][1] == ln]
+    same = [o for o in cands if _head(o.get("name", "")).startswith(head.split()[0]) and o["_wn"][1] == ln
+            and _same_kind(row, o)]
     if len(same) > 1:
         two = [o for o in same if _head(o.get("name", "")) == head]
         same = two or same

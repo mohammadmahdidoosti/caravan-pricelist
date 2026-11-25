@@ -82,3 +82,12 @@ def test_candidates_exact_size_first_and_one_missing_number():
         o["_wn"] = words_nums(o["name"])
     assert _cands({"name": "زانو ۹۰ درجه قطر خارجی ۹۰"}, offs)[0]["name"].endswith("قطر 90 میلی متر برند ناردین پلیمر")
     assert "استخری" in _cands({"name": "لوله های استخری فشار قوی ۱۶ بار سایز ۲۰*۱/۵"}, offs)[0]["name"]
+
+
+def test_rule_pick_keeps_the_kind():
+    from pl.match import _rule_pick
+    from pl.text import words_nums
+    o = {"name": "زانو ۹۰ درجه پلیکا قطر ۶۳ میلی متر برند ناردین پلیمر"}
+    o["_wn"] = words_nums(o["name"])
+    assert _rule_pick({"name": "زانو خم ۹۰ درجه قطر خارجی ۶۳"}, [o]) == []
+    assert _rule_pick({"name": "زانو ۹۰ درجه قطر خارجی ۶۳"}, [o]) == [o]
