@@ -93,13 +93,34 @@ def _object_box(im: Image.Image) -> tuple[int, int, int, int] | None:
                 best, best_box, best_cells = n, (bx0, by0, bx1, by1), cells
     if not best_box or best < 30:
         return None
+    # a title printed right under (or over) the picture can touch it: cut the patch at thin rows and keep the
+    # biggest part
+    rows: dict[int, int] = {}
+    for _, y in best_cells:
+        rows[y] = rows.get(y, 0) + 1
+    widest = max(rows.values())
+    parts, cur = [], []
+    for y in range(best_box[1], best_box[3] + 1):
+        if rows.get(y, 0) <= max(1, int(0.08 * widest)):
+            if cur:
+                parts.append(cur)
+            cur = []
+        else:
+            cur.append(y)
+    if cur:
+        parts.append(cur)
+    if len(parts) > 1:
+        keep_rows = set(max(parts, key=lambda ys: sum(rows[y] for y in ys)))
+        best_cells = [(x, y) for x, y in best_cells if y in keep_rows]
+        xs = [x for x, _ in best_cells]
+        best_box = (min(xs), min(keep_rows), max(xs), max(keep_rows))
     x0, y0, x1, y1 = best_box
     keep = Image.new("L", (gw, gh), 0)
     kp = keep.load()
     for x, y in best_cells:
         kp[x, y] = 255
     from PIL import ImageFilter
-    keep = keep.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(3))   # close small holes, keep edges
+    keep = keep.filter(ImageFilter.MaxFilter(3))   # close small holes, keep edges
     _object_box.mask = keep.resize((w, h), Image.BILINEAR)
     return max(0, x0 * step - step), max(0, y0 * step - step), min(w, (x1 + 2) * step), min(h, (y1 + 2) * step)
 
@@ -130,6 +151,12 @@ def catalog_photo(path: Path, page: int, name: str) -> tuple[bytes | None, list[
     """(webp bytes, box, cost) of the product's picture on that page; (None, None, cost) when none was found."""
     img = page_image(path, page, 300)
     box, usd = find_box(img, name)
+    if not box:
+        import re
+        short = re.split(r"[\d۰-۹]", name, maxsplit=1)[0].strip()
+        if short and short != name:
+            box, u2 = find_box(img, short)
+            usd += u2
     if not box:
         return None, None, usd
     pic = make(img, box)
