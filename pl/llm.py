@@ -18,6 +18,20 @@ def model() -> str:
     return os.environ.get("PL_MODEL", "deepseek/deepseek-v4.1-flash")
 
 
+# Which provider answered (for comparing providers); counted per process.
+SERVED: dict[str, int] = {}
+
+
+def provider() -> dict | None:
+    """PL_PROVIDER='deepinfra/fp8/flex,deepinfra/fp8' pins OpenRouter to those providers in that order (flex is the
+    cheaper low-priority lane, the second one its fallback); unset = OpenRouter chooses. PL_PROVIDER_FALLBACKS=0 stops
+    OpenRouter from going to any other provider."""
+    order = [x.strip() for x in os.environ.get("PL_PROVIDER", "").split(",") if x.strip()]
+    if not order:
+        return None
+    return {"order": order, "allow_fallbacks": os.environ.get("PL_PROVIDER_FALLBACKS", "1") != "0"}
+
+
 def has_key() -> bool:
     return bool(os.environ.get("OPENROUTER_API_KEY"))
 
@@ -29,9 +43,11 @@ def ask(messages: list, max_tokens: int = 4000, title: str = "Caravan supplier p
         raise RuntimeError("OPENROUTER_API_KEY is not set")
     body = {"model": model(), "max_tokens": max_tokens, "temperature": 0, "reasoning": {"enabled": False},
             "response_format": {"type": "json_object"}, "messages": messages, "usage": {"include": True}}
+    if provider():
+        body["provider"] = provider()
     for attempt in range(3):
         try:
-            r = requests.post(OPENROUTER, json=body, timeout=180, headers={
+            r = requests.post(OPENROUTER, json=body, timeout=660 if "flex" in os.environ.get("PL_PROVIDER", "") else 180, headers={
                 "Authorization": f"Bearer {key}", "Content-Type": "application/json",
                 "HTTP-Referer": "https://caravansanat.com", "X-Title": title})
         except requests.RequestException as e:
@@ -46,6 +62,8 @@ def ask(messages: list, max_tokens: int = 4000, title: str = "Caravan supplier p
             return None, 0.0
         j = r.json()
         usd = float((j.get("usage") or {}).get("cost") or 0)
+        who = str(j.get("provider") or "?")
+        SERVED[who] = SERVED.get(who, 0) + 1
         text = ((j.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         m = re.search(r"\{.*\}", text, re.S)
         try:
