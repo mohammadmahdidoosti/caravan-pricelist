@@ -23,7 +23,8 @@ FIND_SYSTEM = """You look at one page of a supplier's catalog. Find the PRODUCT 
 itself, not its title text, not a table, not the maker's logo or a decoration) that belongs to the product named by
 the user. Catalog pages usually print one picture beside each block of rows, with the block's product name under or
 next to it. Return JSON only: {"box": [x0, y0, x1, y1]} in fractions of the page width and height (0..1), tight
-around the picture, or {"box": null} when the page shows no picture for that product."""
+around the picture ONLY: the product's title or any other text under, over or beside it must stay OUTSIDE the box.
+Or {"box": null} when the page shows no picture for that product."""
 
 
 def page_image(path: Path, page: int, dpi: int) -> Image.Image:
