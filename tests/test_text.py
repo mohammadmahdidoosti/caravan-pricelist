@@ -28,11 +28,12 @@ def test_size_column_joins_name():
 def test_misread_title_words_are_put_right():
     from pl.spell import fix_names
     offers = [{"name": "کلاهک پلیکا قطر ۹۰ ناردین"}, {"name": "سوکت پله ای پلیکا ۶۳"}]
-    rows = [{"name": "بوشن ترمودار قطر خارجی ۶۳"}, {"name": "کلاک قطر خارجی ۹۰"}, {"name": "کمرند تعمیری قطر خارجی ۹۰"},
+    rows = [{"name": "بوشن ترمودار قطر خارجی ۶۳"}, {"name": "کلاک قطر خارجی ۹۰"}, {"name": "کمرند تعمیری قطر خارجی ۹۰"}, {"name": "کمرینگ تعمیری ۶۳"},
             {"name": "سوکت پله ای (موفه چسبی) قطر خارجی ۶۳"}]
-    assert fix_names(rows, offers) == 3
+    assert fix_names(rows, offers) == 4
     assert rows[0]["name"].startswith("بوشن ترمزدار")
     assert rows[1]["name"].startswith("کلاهک ")
     assert rows[2]["name"].startswith("کمربند تعمیری")
-    assert rows[3]["name"] == "سوکت پله ای (موفه چسبی) قطر خارجی ۶۳"
+    assert rows[3]["name"].startswith("کمربند")
+    assert rows[4]["name"] == "سوکت پله ای (موفه چسبی) قطر خارجی ۶۳"
     assert "ترمودار → ترمزدار" in rows[0]["note"]

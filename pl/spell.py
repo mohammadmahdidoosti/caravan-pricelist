@@ -30,7 +30,9 @@ def _near(a: str, b: str) -> bool:
     if len(b) == len(a) + 1:
         return any(b[:i] + b[i + 1:] == a for i in range(len(b)))
     if len(b) == len(a):
-        return sum(x != y for x, y in zip(a, b)) == 1
+        diff = sum(x != y for x, y in zip(a, b))
+        # a long word may have two letters misread (کمرینگ -> کمربند) when its first two letters agree
+        return diff == 1 or (diff == 2 and len(a) >= 6 and a[:2] == b[:2])
     return False
 
 
