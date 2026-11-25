@@ -16,3 +16,10 @@ def test_name():
     assert same_by_name("سانورتر 6 کیلووات گرووات", "سانورتر 6 گرووات")
     assert not same_by_name("سانورتر 12 کیلووات گرووات", "سانورتر 6 گرووات")
     assert row_key("", "شیلنگ دوسر مهره 40 استیل").startswith("N")
+
+
+def test_size_column_joins_name():
+    from pl.read import _with_size
+    assert _with_size("رابط انبساطی (موفه)", "قطر خارجی ۹۰") == "رابط انبساطی (موفه) قطر خارجی ۹۰"
+    assert _with_size("زانو 45 درجه سایز 40", "40") == "زانو 45 درجه سایز 40"
+    assert _with_size("سوکت", "") == "سوکت"

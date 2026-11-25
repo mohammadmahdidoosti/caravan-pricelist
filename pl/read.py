@@ -27,6 +27,8 @@ Return JSON: {"list_date": "<date or month and year printed, e.g. آبان ۱۴�
             VR2402-BCK, LE-710, P3355, 2119); empty when the row has no model code. Never put a size, a size range
             (90-315, 1/2 اینچ) or a row number here>",
            "name": "<the row's full product name as printed, with its sizes and variant words>",
+           "size": "<this row's size as printed, with its column header word when the size sits in its own column
+            (قطر خارجی 90, سایز 40, 1/2 اینچ, 110-45), or empty when the row has no size>",
            "brand": "<maker of this row if it differs from the page's, else empty>",
            "price": "<the price digits exactly as printed, or empty when the row shows no price>",
            "unit": "rial|toman|thousand_toman|thousand_rial|unknown",
@@ -37,6 +39,9 @@ GRID TABLES: when a table is a grid (product types down the side, sizes in a col
 variants such as استیل / آلومینیوم / گالوانیزه), give one row per printed price and build its name from the product
 type + the size (with the size's header word, e.g. «سایز 40») + the column's variant word, e.g.
 «شیلنگ دوسر مهره سایز 40 استیل». A product type written once for a block of rows applies to every row of that block.
+SIZE COLUMNS: when the size is printed in its own column (قطر خارجی, سایز, اندازه, قطر, diameter) beside a product
+picture or a block title, every row's name MUST still carry its own size, e.g. «رابط انبساطی (موفه) قطر خارجی 90»;
+rows of one block differ only by their size, so a name without the size is wrong.
 Copy digits exactly: every digit and every group of three, never drop or add a zero. A page prints its prices with the
 same number of digits in a column; a price much shorter than its neighbours is a misread. Iranian lists often group
 digits with a slash or a dot instead of a comma: «۱/۴۹۹/۰۰۰» or 1.499.000 is 1499000; never read the slash as a decimal
@@ -199,12 +204,28 @@ def sheet_text(f: Path, max_rows: int = 600) -> str:
 
 # ------------------------------------------------------------------ one list
 
+def _nums(s: str) -> list[str]:
+    return re.findall(r"\d+(?:[./]\d+)?", s.translate(FA_DIGITS))
+
+
+def _with_size(name: str, size: str) -> str:
+    """The row's size joins its name when the model left it out (a size column beside a block of rows)."""
+    name, size = name.strip(), size.strip()
+    want = _nums(size)
+    if not want or not name:
+        return name or size
+    have = set(_nums(name))
+    if all(n in have for n in want):
+        return name
+    return f"{name} {size}"
+
+
 def _rows_of(j: dict | None, label: str) -> list[dict]:
     out = []
     for r in (j or {}).get("rows") or []:
         if isinstance(r, dict):
             out.append({"brand": str(r.get("brand") or "").strip() or str((j or {}).get("brand") or ""),
-                        "model": str(r.get("model") or ""), "name": str(r.get("name") or ""),
+                        "model": str(r.get("model") or ""), "name": _with_size(str(r.get("name") or ""), str(r.get("size") or "")),
                         "price": str(r.get("price") or ""), "unit": str(r.get("unit") or "unknown"),
                         "vat": "yes" if r.get("vat") is True else "",
                         "stock": str(r.get("stock") or "").strip().lower(),
