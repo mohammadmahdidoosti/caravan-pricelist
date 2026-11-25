@@ -11,6 +11,7 @@ import csv
 import io
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from pathlib import Path
@@ -398,15 +399,24 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
     """A PDF with a text layer: a price read from the picture must be printed on its page (as read, or as toman
     or rial of it). Rows whose price is not there get a note and wait for a person."""
     texts: dict[str, set] = {}
+    t0 = time.monotonic()
     for f in files:
         if not f.name.lower().endswith(".pdf"):
             continue
         try:
-            import pdfplumber
-            with pdfplumber.open(str(f)) as pdf:
-                for i, page in enumerate(pdf.pages, 1):
-                    texts[f"{f.name} ص{i}"] = page_nums(page.extract_text() or "")
-        except Exception:                                # noqa: BLE001
+            # pdfium reads a page's text in milliseconds; pdfplumber took over an hour on a 6 MB drawing-heavy
+            # catalog (25 Nov 2026) and the job sat at 80%. A text check is a bonus: it stops after 90 seconds.
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(str(f))
+            for i in range(len(pdf)):
+                if time.monotonic() - t0 > 90:
+                    log.warning("text check stopped after 90s at %s page %d", f.name, i + 1)
+                    break
+                tp = pdf[i].get_textpage()
+                texts[f"{f.name} ص{i + 1}"] = page_nums(tp.get_text_range() or "")
+            pdf.close()
+        except Exception as e:                           # noqa: BLE001
+            log.warning("text check %s: %s", f.name, e)
             continue
     for r in rows:
         nums = texts.get(r.get("file", ""))
