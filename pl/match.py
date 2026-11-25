@@ -70,26 +70,26 @@ def _head(name: str) -> str:
 _KIND_SKIP = {"های", "ها", "قطر", "سایز", "خارجی", "داخلی", "درجه", "و", "با"}
 
 
+# Words that make a fitting another kind of the same family (زانو خم, زانو دو سر کوپله, سه راه تبدیل, کلاهک H ...).
+_SUBKIND = {"خم", "دو", "کوپله", "ترمزدار", "تخت", "پله", "انبساطی", "تبدیل", "h", "چند", "منظوره", "تعمیری", "کوتاه",
+            "بلند", "یکطرفه", "دوطرفه"}
+
+
 def _same_kind(row: dict, offer: dict) -> bool:
-    """The row's kind is the product's kind. The first word before any number must be in the product's name
-    (سوکت is not رابط); the second one only when the product's own name has a single kind word (a plain زانو is
-    not a زانو خم or a زانو دو سر کوپله), since two-word names may be synonyms (لوله تحت فشار / لوله آبرسانی).
-    'چهارراه' / 'چهار راه' and 'فلانج' / 'فلنج' are one."""
+    """The row's kind is the product's kind: the first word before any number is in the product's name (سوکت is not
+    رابط), and a word that makes another kind of the same family (خم, دو سر کوپله, تبدیل, H ...) is in both names
+    or in neither (a plain زانو is not a زانو خم, a زانو خم is not a زانو دو سر کوپله). Other words may differ
+    (لوله تحت فشار / لوله آبرسانی). 'چهارراه' / 'چهار راه' and 'فلانج' / 'فلنج' are one."""
     def flat(t: str) -> str:
         return t.replace(" ", "").replace("ا", "").replace("آ", "")
 
-    def kind(name: str) -> list[str]:
-        return [w for w in _head(name).split() if w not in _KIND_SKIP and len(w) >= 2]
-
-    hay = flat(norm_text(offer.get("name", "")))
-    rk = kind(row.get("name") or "")
-    if not rk:
-        return True
-    if flat(rk[0]) not in hay:
+    rk = [w for w in _head(row.get("name") or "").split() if w not in _KIND_SKIP and len(w) >= 2]
+    on = norm_text(offer.get("name", ""))
+    if rk and flat(rk[0]) not in flat(on):
         return False
-    if len(rk) > 1 and len(kind(offer.get("name", ""))) <= 1 and flat(rk[1]) not in hay:
-        return False
-    return True
+    rs = set(norm_text(row.get("name") or "").split()) & _SUBKIND
+    os_ = set(on.split()) & _SUBKIND
+    return rs == os_
 
 
 def _narrow(row: dict, items: list[dict]) -> list[dict]:

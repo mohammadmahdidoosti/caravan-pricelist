@@ -97,3 +97,11 @@ def test_two_word_kind_names_may_be_synonyms():
     from pl.match import _same_kind
     assert _same_kind({"name": "لوله تحت فشار چسبی سایز 63*2"}, {"name": "لوله آبرسانی UPVC سایز ۶۳ × ۲ میلی متر"})
     assert not _same_kind({"name": "سوکت پله ای قطر ۶۳"}, {"name": "رابط انبساطی (موفه) پلیکا قطر ۶۳"})
+
+
+def test_bent_elbow_is_not_double_socket_elbow():
+    from pl.match import _same_kind
+    assert not _same_kind({"name": "زانو خم ۹۰ درجه قطر خارجی ۹۰"}, {"name": "زانو دو سر کوپله ۹۰ درجه پلیکا قطر ۹۰"})
+    assert not _same_kind({"name": "سه راه 45 درجه قطر خارجی 110"}, {"name": "سه راه تبدیل ۴۵ درجه پلیکا قطر ۱۱۰-۷۵"})
+    assert _same_kind({"name": "سوکت پله ای (موفه چسبی) قطر خارجی ۶۳"}, {"name": "سوکت پله ای (موفه چسبی) پلیکا قطر ۶۳ میلی متر"})
+    assert _same_kind({"name": "کمربند تعمیری قطر خارجی ۶۳"}, {"name": "کمربند تعمیری پلیکا قطر ۶۳"})
