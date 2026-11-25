@@ -67,14 +67,21 @@ def _head(name: str) -> str:
     return " ".join(out)
 
 
+_KIND_SKIP = {"های", "ها", "قطر", "سایز", "خارجی", "داخلی", "درجه", "و", "با"}
+
+
 def _same_kind(row: dict, offer: dict) -> bool:
-    """The row's kind word (سوکت, رابط, زانو ...) is in the product's name; 'چهارراه' and 'چهار راه' are one."""
-    head = _head(row.get("name") or "").split()
-    if not head or len(head[0]) < 3:
-        return True
-    def flat(t: str) -> str:                        # فلانج / فلنج, چهارراه / چهار راه
+    """The row's kind words (the first two words before any number: سوکت پله, زانو خم, زانو دو) are in the product's
+    name; a plain زانو is not a زانو خم. 'چهارراه' / 'چهار راه' and 'فلانج' / 'فلنج' are one."""
+    def flat(t: str) -> str:
         return t.replace(" ", "").replace("ا", "").replace("آ", "")
-    return flat(head[0]) in flat(norm_text(offer.get("name", "")))
+    hay = flat(norm_text(offer.get("name", "")))
+    for w in _head(row.get("name") or "").split():
+        if w in _KIND_SKIP or len(w) < 2:
+            continue
+        if flat(w) not in hay:
+            return False
+    return True
 
 
 def _narrow(row: dict, items: list[dict]) -> list[dict]:
@@ -107,20 +114,30 @@ def _rule_pick(row: dict, cands: list[dict]) -> list[dict]:
 
 
 def _cands(row: dict, offers: list[dict], n: int = 8) -> list[dict]:
-    """Offers sharing words with the row and carrying all its numbers, best first."""
+    """Offers sharing words with the row and carrying all its numbers, best first; a product with exactly the row's
+    numbers comes first (a 90 elbow of size 90 before the 90 elbows of other sizes). When none carries them all, the
+    ones missing a single number (the list adds «۱۶ بار» the shop's name leaves out)."""
     lw, ln = words_nums(row.get("name") or row.get("model") or "")
     if not lw:
         return []
-    scored = []
-    for o in offers:
-        pw, pn = o["_wn"]
-        if ln and not ln <= pn:
-            continue
-        common = len(lw & pw)
-        if common:
-            scored.append((common / max(len(lw), 1) + common / max(len(pw), 1) + 0.5 * _brand_hits(row, o), o))
-    scored.sort(key=lambda x: -x[0])
-    return [o for _, o in scored[:n]]
+
+    def scored(miss: int) -> list:
+        out = []
+        for o in offers:
+            pw, pn = o["_wn"]
+            if ln and len(ln - pn) > miss:
+                continue
+            common = len(lw & pw)
+            if common:
+                out.append((common / max(len(lw), 1) + common / max(len(pw), 1) + 0.5 * _brand_hits(row, o)
+                            + (1.0 if ln and pn == ln else 0.0), o))
+        out.sort(key=lambda x: -x[0])
+        return out
+
+    got = scored(0)
+    if not got and len(ln) >= 3:
+        got = scored(1)
+    return [o for _, o in got[:n]]
 
 
 def _pick(row: dict, cands: list[dict]) -> tuple[list[int], float]:

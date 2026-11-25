@@ -62,3 +62,23 @@ def test_plain_product_wins_over_a_variant():
     plain = {"name": "کلاهک پلیکا قطر ۹۰ میلی متر برند ناردین پلیمر"}
     assert _narrow(row, [h, plain]) == [plain]
     assert _narrow({"name": "کلاهک H قطر خارجی ۹۰"}, [h, plain]) == [h]
+
+
+def test_bent_and_double_socket_elbows_are_other_kinds():
+    from pl.match import _same_kind
+    plain = {"name": "زانو ۹۰ درجه پلیکا قطر ۶۳ میلی متر برند ناردین پلیمر"}
+    assert not _same_kind({"name": "زانو خم ۹۰ درجه قطر خارجی ۶۳"}, plain)
+    assert not _same_kind({"name": "زانو دو سر کوپله ۹۰ درجه قطر خارجی ۱۲۵"}, plain)
+    assert _same_kind({"name": "زانو ۹۰ درجه قطر خارجی ۶۳"}, plain)
+    assert _same_kind({"name": "لوله های استخری فشار قوی ۱۶ بار سایز ۲۰*۱/۵"}, {"name": "لوله استخری (هیدروپول) UPVC سایز ۲۰ × ۱/۵"})
+
+
+def test_candidates_exact_size_first_and_one_missing_number():
+    from pl.match import _cands
+    from pl.text import words_nums
+    offs = [{"name": f"زانو ۹۰ درجه پلیکا قطر {s} میلی متر برند ناردین پلیمر"} for s in (40, 50, 63, 75, 110, 125, 160, 200, 250, 90)]
+    offs.append({"name": "لوله استخری (هیدروپول) UPVC سایز ۲۰ × ۱/۵ میلی متر برند ناردین پلیمر"})
+    for o in offs:
+        o["_wn"] = words_nums(o["name"])
+    assert _cands({"name": "زانو ۹۰ درجه قطر خارجی ۹۰"}, offs)[0]["name"].endswith("قطر 90 میلی متر برند ناردین پلیمر")
+    assert "استخری" in _cands({"name": "لوله های استخری فشار قوی ۱۶ بار سایز ۲۰*۱/۵"}, offs)[0]["name"]
