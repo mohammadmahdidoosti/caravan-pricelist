@@ -67,20 +67,22 @@ def _object_box(im: Image.Image) -> tuple[int, int, int, int] | None:
     for y in range(gh):
         for x in range(gw):
             r, g, b = px[x, y]
-            on[y][x] = min(r, g, b) < 238 and hsv[x, y][1] < 70
+            # not white, not strongly coloured, not black (titles are printed in black; PVC is grey/white)
+            on[y][x] = min(r, g, b) < 238 and hsv[x, y][1] < 70 and max(r, g, b) > 75
     seen = [[False] * gw for _ in range(gh)]
-    best, best_box = 0, None
+    best, best_box, best_cells = 0, None, []
     for y0 in range(gh):
         for x0 in range(gw):
             if not on[y0][x0] or seen[y0][x0]:
                 continue
-            stack, n = [(x0, y0)], 0
+            stack, n, cells = [(x0, y0)], 0, []
             seen[y0][x0] = True
             bx0 = bx1 = x0
             by0 = by1 = y0
             while stack:
                 x, y = stack.pop()
                 n += 1
+                cells.append((x, y))
                 bx0, bx1, by0, by1 = min(bx0, x), max(bx1, x), min(by0, y), max(by1, y)
                 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                     nx, ny = x + dx, y + dy
@@ -88,10 +90,17 @@ def _object_box(im: Image.Image) -> tuple[int, int, int, int] | None:
                         seen[ny][nx] = True
                         stack.append((nx, ny))
             if n > best:
-                best, best_box = n, (bx0, by0, bx1, by1)
+                best, best_box, best_cells = n, (bx0, by0, bx1, by1), cells
     if not best_box or best < 30:
         return None
     x0, y0, x1, y1 = best_box
+    keep = Image.new("L", (gw, gh), 0)
+    kp = keep.load()
+    for x, y in best_cells:
+        kp[x, y] = 255
+    from PIL import ImageFilter
+    keep = keep.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(3))   # close small holes, keep edges
+    _object_box.mask = keep.resize((w, h), Image.BILINEAR)
     return max(0, x0 * step - step), max(0, y0 * step - step), min(w, (x1 + 2) * step), min(h, (y1 + 2) * step)
 
 
@@ -102,7 +111,8 @@ def make(img: Image.Image, box: list[float], size: int = 1000) -> Image.Image:
                      min(W, int(box[2] * W + mx)), min(H, int(box[3] * H + my))))
     ob = _object_box(crop)
     if ob:
-        crop = crop.crop(ob)
+        white = Image.new("RGB", crop.size, (255, 255, 255))
+        crop = Image.composite(crop, white, _object_box.mask).crop(ob)   # everything but the product turns white
     side = int(max(crop.size) / 0.84)                  # the product fills ~84% of the square
     out = Image.new("RGB", (side, side), (255, 255, 255))
     out.paste(crop, ((side - crop.width) // 2, (side - crop.height) // 2))
