@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import llm
-from .text import FA_DIGITS, list_date_rank, page_nums, row_key, to_toman
+from .text import FA_DIGITS, list_date_rank, model_key, page_nums, row_key, to_toman
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +52,11 @@ point or drop a group. When a row has several prices for buyers, copy the consum
 the dealer price (همکار / عمده), and the price WITHOUT VAT rather than with it. The unit comes from the words near the
 prices (ریال = rial, تومان = toman, هزار تومان = thousand_toman); a note such as «قیمت‌ها به ریال» applies to the page.
 Leave out cartons, counts, row numbers, phone numbers and other numbers that are not the price. No prose, only the JSON."""
+
+CHECK_SYSTEM = """You check a price list page. Return JSON only: {"rows": [{"model": "<model code exactly as printed>",
+ "price": "<its price digits exactly as printed, or empty>"}]} for EVERY row that has a model code, in page order. Read
+each price digit by digit; Iranian lists group digits with a slash or a dot («۱/۴۹۹/۰۰۰», 1.499.000). Never invent a row:
+a code that is not printed on this page must not appear."""
 
 TEXT_USER = "Read every priced product of this price list (a spreadsheet as text, one line per row, cells separated by ' | ')."
 
@@ -269,20 +274,50 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
 
     def look(x):
         _, label, pic, mime = x
-        return label, llm.ask([{"role": "system", "content": VISION_SYSTEM},
-                               {"role": "user", "content": [{"type": "text", "text": "Read every priced product of this price list."},
-                                                            llm.image_part(pic, mime)]}], max_tokens=8000)
+        j, c = llm.ask([{"role": "system", "content": VISION_SYSTEM},
+                        {"role": "user", "content": [{"type": "text", "text": "Read every priced product of this price list."},
+                                                     llm.image_part(pic, mime)]}], max_tokens=8000)
+        # a second, independent reading of codes and prices only: a misread digit or an invented row shows up
+        k, c2 = llm.ask([{"role": "system", "content": CHECK_SYSTEM},
+                         {"role": "user", "content": [{"type": "text", "text": "List every model code and its price."},
+                                                      llm.image_part(pic, mime)]}], max_tokens=6000)
+        return label, j, c + c2, k
     with ThreadPoolExecutor(4) as ex:
-        for n, (label, (j, c)) in enumerate(ex.map(look, pics), 1):
-            usd, calls = usd + c, calls + 1
+        for n, (label, j, c, k) in enumerate(ex.map(look, pics), 1):
+            usd, calls = usd + c, calls + 2
             if j is None:
                 failed.append(f"{label}: خوانده نشد")
-            rows += _rows_of(j, label)
+            got = _rows_of(j, label)
+            cross_check(got, k)
+            rows += got
             if progress:
                 progress(n, len(pics))
     _check_with_text(files, rows, unit_hint)
     items = merge(rows, unit_hint)
     return {"rows": items, "usd": round(usd, 4), "calls": calls, "failed": failed, "pages": len(pics)}
+
+
+def _digits(p) -> str:
+    return re.sub(r"\D", "", str(p or "").translate(FA_DIGITS))
+
+
+def cross_check(rows: list[dict], second: dict | None) -> None:
+    """Rows of one page against the second reading: a code the second reading did not see, or a price it read
+    differently, gets a note and waits for a person."""
+    if not isinstance(second, dict) or not isinstance(second.get("rows"), list) or not second["rows"]:
+        return
+    seen: dict[str, str] = {}
+    for x in second["rows"]:
+        if isinstance(x, dict) and model_key(x.get("model")):
+            seen[model_key(x.get("model"))] = _digits(x.get("price"))
+    for r in rows:
+        k = model_key(r.get("model"))
+        if len(k) < 3:
+            continue
+        if k not in seen:
+            r["check"] = "این کد در خواندن دوم صفحه دیده نشد؛ بررسی کنید"
+        elif seen[k] and _digits(r.get("price")) and seen[k] != _digits(r.get("price")):
+            r["check"] = f"قیمت در خواندن دوم {seen[k]} خوانده شد؛ بررسی کنید"
 
 
 def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> None:

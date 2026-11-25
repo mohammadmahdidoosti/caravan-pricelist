@@ -5,6 +5,8 @@ POST /jobs/pull   JSON {"meta_url": "...", "files": [{"url": "...", "name": "lis
 POST /jobs        files[] + meta (JSON): {supplier_id, supplier_name, unit_hint, offers: [...], aliases: {key: offer_id},
                   callback_url}  ->  {"id": "<job>"}
 GET  /jobs/<id>   {"status": queued|reading|matching|done|failed, "progress": .., "result": {...}}
+GET  /jobs/<id>/photo?label=<file label of a row>&name=<product name>
+                  {"webp": base64, "box": [x0,y0,x1,y1], "usd": ..}: the product's picture cut out of its catalog page
 GET  /health      {"ok": true, "model": .., "key": true|false}
 
 Every call but /health needs the header X-PL-Token equal to the PL_TOKEN environment variable. Secrets live only in
@@ -99,6 +101,29 @@ def _run(job: Path, meta: dict) -> None:
                           headers={"X-PL-Token": os.environ.get("PL_TOKEN", "")}, timeout=20)
         except requests.RequestException as e:
             log.info("callback %s: %s", job.name, e)
+
+
+@app.get("/jobs/{jid}/photo")
+def job_photo(jid: str, label: str, name: str, x_pl_token: str | None = Header(None)):
+    """The picture of one row's product, cut from the page the row was read on (label: 'list.pdf ص3' or a file)."""
+    import base64
+    from pl.photo import catalog_photo
+    _auth(x_pl_token)
+    if not re.fullmatch(r"[\w\-]{10,60}", jid) or not (DATA / jid / "files").is_dir():
+        raise HTTPException(status_code=404)
+    m = re.match(r"^(.*?)(?: ص(\d+))?$", label.strip())
+    fname, page = Path(m.group(1)).name, int(m.group(2) or 1)
+    path = DATA / jid / "files" / fname
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file not in this job")
+    try:
+        pic, box, usd = catalog_photo(path, page, name[:200])
+    except Exception as e:                               # noqa: BLE001
+        log.warning("photo %s %s: %s", jid, label, e)
+        raise HTTPException(status_code=500, detail="photo failed")
+    if not pic:
+        return {"webp": None, "box": None, "usd": usd}
+    return {"webp": base64.b64encode(pic).decode(), "box": box, "usd": usd}
 
 
 @app.get("/health")

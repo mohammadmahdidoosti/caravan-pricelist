@@ -37,3 +37,13 @@ def test_misread_title_words_are_put_right():
     assert rows[3]["name"].startswith("کمربند")
     assert rows[4]["name"] == "سوکت پله ای (موفه چسبی) قطر خارجی ۶۳"
     assert "ترمودار → ترمزدار" in rows[0]["note"]
+
+
+def test_second_reading_flags_digits_and_invented_rows():
+    from pl.read import cross_check
+    rows = [{"model": "NP-EI07", "price": "۳,۴۳۹,۶۰۰"}, {"model": "NP-EI06", "price": "3634000"},
+            {"model": "NP-MVCD1", "price": "297600"}]
+    cross_check(rows, {"rows": [{"model": "NP-EI07", "price": "3339600"}, {"model": "NPEI06", "price": "۳,۶۳۴,۰۰۰"}]})
+    assert "3339600" in rows[0]["check"]
+    assert "check" not in rows[1]
+    assert "دیده نشد" in rows[2]["check"]
