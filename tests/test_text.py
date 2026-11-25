@@ -47,3 +47,11 @@ def test_second_reading_flags_digits_and_invented_rows():
     assert "3339600" in rows[0]["check"]
     assert "check" not in rows[1]
     assert "دیده نشد" in rows[2]["check"]
+
+
+def test_photo_box_needs_two_agreeing_answers(monkeypatch):
+    from pl import photo
+    answers = iter([[0.6, 0.4, 0.8, 0.5], [0.83, 0.58, 0.96, 0.7], [0.835, 0.575, 0.965, 0.705]])
+    monkeypatch.setattr(photo, "find_box", lambda img, name: (next(answers), 0.001))
+    box, usd = photo.agreed_box(None, "x")
+    assert box and 0.82 < box[0] < 0.84 and usd > 0

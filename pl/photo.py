@@ -148,15 +148,38 @@ def make(img: Image.Image, box: list[float], size: int = 1000) -> Image.Image:
     return out
 
 
+def _iou(a: list[float], b: list[float]) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def agreed_box(img: Image.Image, name: str, tries: int = 3) -> tuple[list[float] | None, float]:
+    """The model sometimes points at the wrong spot: ask up to three times and keep a box two answers agree on."""
+    boxes, usd = [], 0.0
+    for _ in range(tries):
+        b, u = find_box(img, name)
+        usd += u
+        if not b:
+            continue
+        for o in boxes:
+            if _iou(o, b) > 0.5:
+                return [round((x + y) / 2, 4) for x, y in zip(o, b)], usd
+        boxes.append(b)
+    return None, usd
+
+
 def catalog_photo(path: Path, page: int, name: str) -> tuple[bytes | None, list[float] | None, float]:
     """(webp bytes, box, cost) of the product's picture on that page; (None, None, cost) when none was found."""
     img = page_image(path, page, 300)
-    box, usd = find_box(img, name)
+    box, usd = agreed_box(img, name)
     if not box:
         import re
         short = re.split(r"[\d۰-۹]", name, maxsplit=1)[0].strip()
         if short and short != name:
-            box, u2 = find_box(img, short)
+            box, u2 = agreed_box(img, short)
             usd += u2
     if not box:
         return None, None, usd
