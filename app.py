@@ -40,7 +40,7 @@ log = logging.getLogger("pricelist")
 DATA = Path(os.environ.get("PL_DATA_DIR", "/data")) / "jobs"
 MAX_FILES = 40
 MAX_BYTES = 30 * 1024 * 1024
-ALLOWED = (".pdf", ".xlsx", ".xlsm", ".csv", ".jpg", ".jpeg", ".png", ".webp")
+ALLOWED = (".pdf", ".xlsx", ".xlsm", ".xls", ".csv", ".jpg", ".jpeg", ".png", ".webp")
 
 app = FastAPI(title="Caravan price lists", docs_url=None, redoc_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1000)   # results reach Iran over a slow line: ~9x smaller

@@ -12,6 +12,7 @@ import io
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 from pathlib import Path
 
 from . import llm
@@ -63,7 +64,7 @@ TEXT_USER = "Read every priced product of this price list (a spreadsheet as text
 STOCK_WORDS = ("موجودی", "وضعیت", "موجود", "stock", "available")
 NO_STOCK = re.compile(r"ناموجود|نا موجود|عدم موجود|اتمام|تمام شد|out\s*of\s*stock|^\s*(0|no|خیر|✗|×|-)\s*$", re.I)
 PICTURE_EXT = (".jpg", ".jpeg", ".png", ".webp")
-TABLE_EXT = (".xlsx", ".xlsm", ".csv")
+TABLE_EXT = (".xlsx", ".xlsm", ".xls", ".csv")
 
 
 # ------------------------------------------------------------------ pictures
@@ -116,8 +117,79 @@ def _red(cell) -> bool:
     return False
 
 
+class _HtmlTable(HTMLParser):
+    """Rows of the first <table> in an HTML page (many accounting programs save «.xls» files as HTML)."""
+
+    def __init__(self):
+        super().__init__()
+        self.rows, self._row, self._cell, self._in, self._depth = [], None, None, False, 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self._depth += 1
+        elif tag == "tr" and self._depth:
+            self._row = []
+        elif tag in ("td", "th") and self._row is not None:
+            self._cell = []
+            span = dict(attrs).get("colspan")
+            self._span = int(span) if span and span.isdigit() else 1
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._cell is not None and self._row is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._row += [""] * (self._span - 1)
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if any(c for c in self._row):
+                self.rows.append(self._row)
+            self._row = None
+        elif tag == "table" and self._depth:
+            self._depth -= 1
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def _num(v):
+    """Excel numbers come back as floats: 2500000.0 -> 2500000."""
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    return v
+
+
+def _xls_grid(f: Path) -> list[list]:
+    """An «.xls» file: real old Excel (xlrd), an xlsx with the wrong name, or an HTML table."""
+    raw = f.read_bytes()
+    if raw[:2] == b"PK":                                  # an xlsx renamed to .xls
+        import openpyxl
+        ws = openpyxl.load_workbook(io.BytesIO(raw), data_only=True).active
+        return [[c.value for c in r] for r in ws.iter_rows()]
+    if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":     # old binary Excel
+        import xlrd
+        sh = xlrd.open_workbook(file_contents=raw).sheet_by_index(0)
+        return [[_num(sh.cell_value(i, j)) or None for j in range(sh.ncols)] for i in range(sh.nrows)]
+    for enc in ("utf-8-sig", "utf-16", "cp1256"):
+        try:
+            txt = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        txt = raw.decode("utf-8", "ignore")
+    if "<t" in txt.lower():
+        p = _HtmlTable()
+        p.feed(txt)
+        if p.rows:
+            return p.rows
+    return list(csv.reader(io.StringIO(txt), delimiter="\t"))  # a tab-separated text file named .xls
+
+
 def _grid(f: Path) -> tuple[list[list], list[list[bool]]]:
     """Cell values and 'written in red' of the first sheet (or the CSV)."""
+    if f.name.lower().endswith(".xls"):
+        rows = _xls_grid(f)
+        return rows, [[False] * len(r) for r in rows]
     if f.name.lower().endswith(".csv"):
         raw = f.read_bytes()
         for enc in ("utf-8-sig", "cp1256", "utf-16"):
