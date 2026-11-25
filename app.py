@@ -74,6 +74,31 @@ def _cleanup() -> None:
             continue
 
 
+def _orphans() -> int:
+    """Jobs that were mid-way when the service stopped (a redeploy or restart kills their thread) would say
+    «reading» forever. They are marked failed so the site shows «دوباره ارسال کن» instead of a stuck progress bar."""
+    n = 0
+    if not DATA.exists():
+        return n
+    for d in DATA.iterdir():
+        f = d / "job.json"
+        try:
+            st = json.loads(f.read_text()).get("status") if f.exists() else None
+        except (OSError, ValueError):
+            continue
+        if st in ("queued", "downloading", "reading", "matching"):
+            _save(d, {"status": "failed", "error": "سرویس خواندن وسط کار دوباره راه‌اندازی شد؛ لطفاً «دوباره ارسال کن» را بزنید."})
+            n += 1
+    return n
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    n = _orphans()
+    if n:
+        log.warning("marked %d interrupted job(s) as failed", n)
+
+
 def _run(job: Path, meta: dict) -> None:
     try:
         files = sorted((job / "files").iterdir())
