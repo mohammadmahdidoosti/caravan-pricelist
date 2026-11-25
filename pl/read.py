@@ -42,6 +42,9 @@ type + the size (with the size's header word, e.g. «سایز 40») + the column
 SIZE COLUMNS: when the size is printed in its own column (قطر خارجی, سایز, اندازه, قطر, diameter) beside a product
 picture or a block title, every row's name MUST still carry its own size, e.g. «رابط انبساطی (موفه) قطر خارجی 90»;
 rows of one block differ only by their size, so a name without the size is wrong.
+TITLES IN A FANCY FONT: a block's product name is often printed once, big and decorative, beside the table. Read it
+letter by letter; it is a real trade word (کلاهک, بوشن ترمزدار, کمربند تعمیری, رابط انبساطی, سه راه, زانو), never a
+shortened or invented one.
 Copy digits exactly: every digit and every group of three, never drop or add a zero. A page prints its prices with the
 same number of digits in a column; a price much shorter than its neighbours is a misread. Iranian lists often group
 digits with a slash or a dot instead of a comma: «۱/۴۹۹/۰۰۰» or 1.499.000 is 1499000; never read the slash as a decimal
@@ -71,7 +74,7 @@ def images_of(f: Path) -> list[tuple[str, bytes, str]]:
         with pdfplumber.open(str(f)) as pdf:
             for i, page in enumerate(pdf.pages, 1):
                 buf = io.BytesIO()
-                page.to_image(resolution=150).original.convert("RGB").save(buf, "JPEG", quality=85)
+                page.to_image(resolution=200).original.convert("RGB").save(buf, "JPEG", quality=85)
                 out.append((f"{f.name} ص{i}", buf.getvalue(), "image/jpeg"))
         return out
     return []

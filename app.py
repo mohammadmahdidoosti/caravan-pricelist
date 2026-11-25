@@ -30,6 +30,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pl import llm
 from pl.match import match, unmatched_offers
 from pl.read import read_files
+from pl.spell import fix_names
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("pricelist")
@@ -79,6 +80,7 @@ def _run(job: Path, meta: dict) -> None:
                          progress=lambda n, t: _save(job, {"progress": round(n / max(t, 1) * 0.8, 2)}))
         _save(job, {"status": "matching", "progress": 0.85})
         offers = meta.get("offers") or []
+        fix_names(got["rows"], offers)               # a word misread from a fancy title font
         m = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
         miss = unmatched_offers(m["rows"], offers)
         result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": miss[:300], "not_in_list_count": len(miss),
