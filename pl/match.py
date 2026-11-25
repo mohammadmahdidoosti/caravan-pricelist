@@ -71,16 +71,24 @@ _KIND_SKIP = {"های", "ها", "قطر", "سایز", "خارجی", "داخلی"
 
 
 def _same_kind(row: dict, offer: dict) -> bool:
-    """The row's kind words (the first two words before any number: سوکت پله, زانو خم, زانو دو) are in the product's
-    name; a plain زانو is not a زانو خم. 'چهارراه' / 'چهار راه' and 'فلانج' / 'فلنج' are one."""
+    """The row's kind is the product's kind. The first word before any number must be in the product's name
+    (سوکت is not رابط); the second one only when the product's own name has a single kind word (a plain زانو is
+    not a زانو خم or a زانو دو سر کوپله), since two-word names may be synonyms (لوله تحت فشار / لوله آبرسانی).
+    'چهارراه' / 'چهار راه' and 'فلانج' / 'فلنج' are one."""
     def flat(t: str) -> str:
         return t.replace(" ", "").replace("ا", "").replace("آ", "")
+
+    def kind(name: str) -> list[str]:
+        return [w for w in _head(name).split() if w not in _KIND_SKIP and len(w) >= 2]
+
     hay = flat(norm_text(offer.get("name", "")))
-    for w in _head(row.get("name") or "").split():
-        if w in _KIND_SKIP or len(w) < 2:
-            continue
-        if flat(w) not in hay:
-            return False
+    rk = kind(row.get("name") or "")
+    if not rk:
+        return True
+    if flat(rk[0]) not in hay:
+        return False
+    if len(rk) > 1 and len(kind(offer.get("name", ""))) <= 1 and flat(rk[1]) not in hay:
+        return False
     return True
 
 

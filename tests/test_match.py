@@ -91,3 +91,9 @@ def test_rule_pick_keeps_the_kind():
     o["_wn"] = words_nums(o["name"])
     assert _rule_pick({"name": "زانو خم ۹۰ درجه قطر خارجی ۶۳"}, [o]) == []
     assert _rule_pick({"name": "زانو ۹۰ درجه قطر خارجی ۶۳"}, [o]) == [o]
+
+
+def test_two_word_kind_names_may_be_synonyms():
+    from pl.match import _same_kind
+    assert _same_kind({"name": "لوله تحت فشار چسبی سایز 63*2"}, {"name": "لوله آبرسانی UPVC سایز ۶۳ × ۲ میلی متر"})
+    assert not _same_kind({"name": "سوکت پله ای قطر ۶۳"}, {"name": "رابط انبساطی (موفه) پلیکا قطر ۶۳"})
