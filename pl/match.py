@@ -10,6 +10,7 @@ The matching rules come from product-crawler (contains_model, weak_key, same_by_
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from . import llm
@@ -23,9 +24,60 @@ SAME_SYSTEM = """You compare one row of a supplier's price list with the product
 Pick every shop product that is the SAME product and the SAME variant as the row: the same size (and size unit), the
 same material (استیل / آلومینیوم / برنج / گالوانیزه ...), the same type and design. Words may differ (digits Persian or
 Latin, سایز 40 = 40 سانتی, ½ = 1/2). Another size, another variant, a spare part or an accessory is NOT the same.
+When the row's brand (maker) is given and a product names ANOTHER brand, it is NOT the same; a product with no brand in
+its name may still be the same.
 Usually there is none or one. Reply JSON only: {"same": [<candidate numbers>]}"""
 
+# Words in a brand line that say nothing about the maker.
+_BRAND_STOP = {"برند", "شرکت", "گروه", "صنایع", "تولیدی", "بازرگانی", "پخش", "فروشگاه", "کارخانه", "و", "co", "company",
+               "group", "ltd", "inc", "industrial", "industries"}
+
 MAX_MODEL_CALLS = 600
+
+
+def _brand_words(row: dict) -> set:
+    """Significant words of the brand read from the list ('ناردین پلیمر اسپادانا' -> ناردین, پلیمر, اسپادانا)."""
+    lw, _ = words_nums(row.get("brand") or "")
+    return {w for w in lw if len(w) >= 3 and w not in _BRAND_STOP}
+
+
+def _brand_hits(row: dict, offer: dict) -> int:
+    bw = _brand_words(row)
+    return len(bw & offer["_wn"][0]) if bw else 0
+
+
+def _by_brand(row: dict, items: list[dict]) -> list[dict]:
+    """Among several same-looking offers, keep the ones of the row's brand (if the brand settles it)."""
+    if len(items) < 2 or not _brand_words(row):
+        return items
+    best = max(_brand_hits(row, o) for o in items)
+    if best == 0:
+        return items                                 # the brand is the distributor's, not in any product name
+    return [o for o in items if _brand_hits(row, o) == best]
+
+
+def _head(name: str) -> str:
+    """The kind of product: the first one or two words before any number ('زانو', 'سه راه', 'تبدیل')."""
+    out = []
+    for w in norm_text(name).split():
+        if re.search(r"\d", w) or len(out) == 2:
+            break
+        out.append(w)
+    return " ".join(out)
+
+
+def _rule_pick(row: dict, cands: list[dict]) -> list[dict]:
+    """No answer from the model: the candidates of the same kind ('زانو' is not 'سه راه') carrying exactly the row's
+    numbers (a 90 elbow of size 110 is not the 90 elbow of size 90), then the row's brand."""
+    head = _head(row.get("name") or "")
+    _, ln = words_nums(row.get("name") or "")
+    if not head or not ln:
+        return []
+    same = [o for o in cands if _head(o.get("name", "")).startswith(head.split()[0]) and o["_wn"][1] == ln]
+    if len(same) > 1:
+        two = [o for o in same if _head(o.get("name", "")) == head]
+        same = two or same
+    return _by_brand(row, same)
 
 
 def _cands(row: dict, offers: list[dict], n: int = 8) -> list[dict]:
@@ -40,13 +92,14 @@ def _cands(row: dict, offers: list[dict], n: int = 8) -> list[dict]:
             continue
         common = len(lw & pw)
         if common:
-            scored.append((common / max(len(lw), 1) + common / max(len(pw), 1), o))
+            scored.append((common / max(len(lw), 1) + common / max(len(pw), 1) + 0.5 * _brand_hits(row, o), o))
     scored.sort(key=lambda x: -x[0])
     return [o for _, o in scored[:n]]
 
 
 def _pick(row: dict, cands: list[dict]) -> tuple[list[int], float]:
-    user = f"row: {row.get('name') or row.get('model')}" + (f" (model {row['model']})" if row.get("model") else "") + "\n" + \
+    user = f"row: {row.get('name') or row.get('model')}" + (f" (model {row['model']})" if row.get("model") else "") + \
+        (f" — brand: {row['brand']}" if row.get("brand") else "") + "\n" + \
         "\n".join(f"{j}: {c['name']}" for j, c in enumerate(cands))
     ans, usd = llm.ask([{"role": "system", "content": SAME_SYSTEM}, {"role": "user", "content": user}], max_tokens=200,
                        title="Caravan supplier price list match")
@@ -80,13 +133,13 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         if k in aliases and str(aliases[k]) in by_id:
             res.update(status="green", how="memory", offers=[_brief(by_id[str(aliases[k])])])
         elif not k.startswith("N") and not weak_key(k):
-            hits = [o for o in offers if contains_model(o["_hay"], k)]
+            hits = _by_brand(r, [o for o in offers if contains_model(o["_hay"], k)])
             if len(hits) == 1:
                 res.update(status="green", how="model", offers=[_brief(hits[0])])
             elif hits:
                 res.update(status="yellow", how="model_many", cands=[_brief(o) for o in hits[:8]])
         if res["status"] == "new":
-            same = [o for o in offers if same_by_name(o.get("name", ""), r.get("name", ""))]
+            same = _by_brand(r, [o for o in offers if same_by_name(o.get("name", ""), r.get("name", ""))])
             if len(same) == 1:
                 res.update(status="green", how="name", offers=[_brief(same[0])])
             elif same:
@@ -103,10 +156,15 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         with ThreadPoolExecutor(6) as ex:
             for (res, cands), (picked, c) in zip(todo, ex.map(lambda x: _pick(x[0], x[1]), todo)):
                 usd += c
-                if len(picked) == 1:
-                    res.update(status="yellow", how="model_pick", offers=[_brief(cands[picked[0]])])
-                elif picked:
-                    res.update(status="yellow", how="model_pick_many", cands=[_brief(cands[j]) for j in picked])
+                chosen = _by_brand(res, [cands[j] for j in picked])
+                how_one = "model_pick" if len(picked) == 1 else "model_pick_brand"
+                if not chosen:
+                    chosen = _rule_pick(res, cands)
+                    how_one = "rule_pick"
+                if len(chosen) == 1:
+                    res.update(status="yellow", how=how_one, offers=[_brief(chosen[0])])
+                elif chosen:
+                    res.update(status="yellow", how="model_pick_many", cands=[_brief(o) for o in chosen])
 
     _infer_units(out)
     for res in out:
