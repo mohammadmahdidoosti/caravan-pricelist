@@ -54,25 +54,45 @@ def find_box(img: Image.Image, name: str) -> tuple[list[float] | None, float]:
 
 
 def _object_box(im: Image.Image) -> tuple[int, int, int, int] | None:
-    """Box of the product: pixels that are not near-white and not strongly coloured (the catalog's purple/blue
-    background is coloured; PVC fittings are grey or white)."""
-    hsv = im.convert("HSV")
+    """Box of the product: the largest connected patch of pixels that are not near-white and not strongly coloured
+    (the catalog's purple/blue background is coloured; PVC fittings are grey or white). The block's title text and
+    thin frame lines are separate, smaller patches and are left out."""
     w, h = im.size
-    px, hp = im.load(), hsv.load()
-    xs, ys = [], []
-    for y in range(0, h, 2):
-        for x in range(0, w, 2):
+    step = max(1, max(w, h) // 220)                   # work on a ~220 px grid
+    gw, gh = w // step, h // step
+    small = im.resize((gw, gh), Image.BILINEAR)
+    hsv = small.convert("HSV").load()
+    px = small.load()
+    on = [[False] * gw for _ in range(gh)]
+    for y in range(gh):
+        for x in range(gw):
             r, g, b = px[x, y]
-            s = hp[x, y][1]
-            if min(r, g, b) < 235 and s < 60:
-                xs.append(x)
-                ys.append(y)
-    if len(xs) < 50:
+            on[y][x] = min(r, g, b) < 238 and hsv[x, y][1] < 70
+    seen = [[False] * gw for _ in range(gh)]
+    best, best_box = 0, None
+    for y0 in range(gh):
+        for x0 in range(gw):
+            if not on[y0][x0] or seen[y0][x0]:
+                continue
+            stack, n = [(x0, y0)], 0
+            seen[y0][x0] = True
+            bx0 = bx1 = x0
+            by0 = by1 = y0
+            while stack:
+                x, y = stack.pop()
+                n += 1
+                bx0, bx1, by0, by1 = min(bx0, x), max(bx1, x), min(by0, y), max(by1, y)
+                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < gw and 0 <= ny < gh and on[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            if n > best:
+                best, best_box = n, (bx0, by0, bx1, by1)
+    if not best_box or best < 30:
         return None
-    xs.sort()
-    ys.sort()
-    k = max(1, len(xs) // 200)                         # drop a few stray pixels at the edges
-    return xs[k], ys[k], xs[-k] + 2, ys[-k] + 2
+    x0, y0, x1, y1 = best_box
+    return max(0, x0 * step - step), max(0, y0 * step - step), min(w, (x1 + 2) * step), min(h, (y1 + 2) * step)
 
 
 def make(img: Image.Image, box: list[float], size: int = 1000) -> Image.Image:
