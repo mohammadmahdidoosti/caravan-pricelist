@@ -53,3 +53,12 @@ def test_other_kind_is_not_picked():
     assert _same_kind({"name": "چهارراه قطر خارجی ۱۱۰-۴۵"}, {"name": "چهار راه پلیکا قطر ۱۱۰-۴۵"})
     assert _same_kind({"name": "زانو 45 درجه سایز 40"}, {"name": "زانو ۴۵ درجه پلیکا قطر ۴۰"})
     assert _same_kind({"name": "فلانج قطر خارجی ۱۶۰"}, {"name": "فلنج پلیکا قطر ۱۶۰"})
+
+
+def test_plain_product_wins_over_a_variant():
+    from pl.match import _narrow
+    row = {"name": "کلاهک قطر خارجی ۹۰", "brand": "ناردین پلیمر اسپادانا"}
+    h = {"name": "کلاهک H پلیکا قطر ۹۰ میلی متر برند ناردین پلیمر"}
+    plain = {"name": "کلاهک پلیکا قطر ۹۰ میلی متر برند ناردین پلیمر"}
+    assert _narrow(row, [h, plain]) == [plain]
+    assert _narrow({"name": "کلاهک H قطر خارجی ۹۰"}, [h, plain]) == [h]

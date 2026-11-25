@@ -77,6 +77,21 @@ def _same_kind(row: dict, offer: dict) -> bool:
     return flat(head[0]) in flat(norm_text(offer.get("name", "")))
 
 
+def _narrow(row: dict, items: list[dict]) -> list[dict]:
+    """Several products fit: a product carrying a word the row does not have (کلاهک H for a row that says only
+    کلاهک) is another variant; keep the plainest one when it is a single product."""
+    if len(items) < 2:
+        return items
+    rw = set(w for w in norm_text(row.get("name") or "").split() if not re.search(r"\d", w))
+    toks = [set(w for w in norm_text(o.get("name", "")).split() if not re.search(r"\d", w)) for o in items]
+    shared = set.intersection(*toks)
+    # words of its own the row lacks + the row's words it lacks; only a product with none of either is "the plain one"
+    some = set.union(*toks)
+    score = [len(t - shared - rw - _brand_words(row)) + len(((rw - shared) & some) - t) for t in toks]
+    keep = [o for o, e in zip(items, score) if e == 0]
+    return keep if len(keep) == 1 else items
+
+
 def _rule_pick(row: dict, cands: list[dict]) -> list[dict]:
     """No answer from the model: the candidates of the same kind ('زانو' is not 'سه راه') carrying exactly the row's
     numbers (a 90 elbow of size 110 is not the 90 elbow of size 90), then the row's brand."""
@@ -88,7 +103,7 @@ def _rule_pick(row: dict, cands: list[dict]) -> list[dict]:
     if len(same) > 1:
         two = [o for o in same if _head(o.get("name", "")) == head]
         same = two or same
-    return _by_brand(row, same)
+    return _narrow(row, _by_brand(row, same))
 
 
 def _cands(row: dict, offers: list[dict], n: int = 8) -> list[dict]:
@@ -167,7 +182,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         with ThreadPoolExecutor(6) as ex:
             for (res, cands), (picked, c) in zip(todo, ex.map(lambda x: _pick(x[0], x[1]), todo)):
                 usd += c
-                chosen = _by_brand(res, [cands[j] for j in picked if _same_kind(res, cands[j])])
+                chosen = _narrow(res, _by_brand(res, [cands[j] for j in picked if _same_kind(res, cands[j])]))
                 how_one = "model_pick" if len(picked) == 1 else "model_pick_brand"
                 if not chosen:
                     chosen = _rule_pick(res, cands)
