@@ -11,3 +11,5 @@ samples/
 *.jpeg
 *.png
 *.webp
+!assets/
+!assets/*.png
