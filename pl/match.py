@@ -26,7 +26,8 @@ same material (استیل / آلومینیوم / برنج / گالوانیزه .
 Latin, سایز 40 = 40 سانتی, ½ = 1/2). Another size, another variant, a spare part or an accessory is NOT the same.
 When the row's brand (maker) is given and a product names ANOTHER brand, it is NOT the same; a product with no brand in
 its name may still be the same.
-Usually there is none or one. Reply JSON only: {"same": [<candidate numbers>]}"""
+Another kind of fitting is NOT the same even at the same size (سوکت پله ای is not رابط انبساطی, a socket is not a
+coupling). Usually there is none or one. Reply JSON only: {"same": [<candidate numbers>]}"""
 
 # Words in a brand line that say nothing about the maker.
 _BRAND_STOP = {"برند", "شرکت", "گروه", "صنایع", "تولیدی", "بازرگانی", "پخش", "فروشگاه", "کارخانه", "و", "co", "company",
@@ -64,6 +65,16 @@ def _head(name: str) -> str:
             break
         out.append(w)
     return " ".join(out)
+
+
+def _same_kind(row: dict, offer: dict) -> bool:
+    """The row's kind word (سوکت, رابط, زانو ...) is in the product's name; 'چهارراه' and 'چهار راه' are one."""
+    head = _head(row.get("name") or "").split()
+    if not head or len(head[0]) < 3:
+        return True
+    def flat(t: str) -> str:                        # فلانج / فلنج, چهارراه / چهار راه
+        return t.replace(" ", "").replace("ا", "").replace("آ", "")
+    return flat(head[0]) in flat(norm_text(offer.get("name", "")))
 
 
 def _rule_pick(row: dict, cands: list[dict]) -> list[dict]:
@@ -156,7 +167,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         with ThreadPoolExecutor(6) as ex:
             for (res, cands), (picked, c) in zip(todo, ex.map(lambda x: _pick(x[0], x[1]), todo)):
                 usd += c
-                chosen = _by_brand(res, [cands[j] for j in picked])
+                chosen = _by_brand(res, [cands[j] for j in picked if _same_kind(res, cands[j])])
                 how_one = "model_pick" if len(picked) == 1 else "model_pick_brand"
                 if not chosen:
                     chosen = _rule_pick(res, cands)

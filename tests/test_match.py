@@ -44,3 +44,12 @@ def test_rule_pick_kind_and_size(monkeypatch):
     out = m.match(rows, offers)["rows"]
     assert out[0]["offers"][0]["offer_id"] == 1 and out[0]["how"] == "rule_pick"
     assert out[1]["offers"][0]["offer_id"] == 3
+
+
+def test_other_kind_is_not_picked():
+    from pl.match import _same_kind
+    row = {"name": "سوکت پله ای (موفه چسبی) قطر خارجی ۶۳"}
+    assert not _same_kind(row, {"name": "رابط انبساطی (موفه) پلیکا قطر ۶۳ میلی متر"})
+    assert _same_kind({"name": "چهارراه قطر خارجی ۱۱۰-۴۵"}, {"name": "چهار راه پلیکا قطر ۱۱۰-۴۵"})
+    assert _same_kind({"name": "زانو 45 درجه سایز 40"}, {"name": "زانو ۴۵ درجه پلیکا قطر ۴۰"})
+    assert _same_kind({"name": "فلانج قطر خارجی ۱۶۰"}, {"name": "فلنج پلیکا قطر ۱۶۰"})
