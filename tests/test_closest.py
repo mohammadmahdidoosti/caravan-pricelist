@@ -129,3 +129,8 @@ def test_headless_sheet():
     assert rows[0]["model"] == "2140101100" and rows[0]["price"] == "200000"
     assert "R1" in rows[2]["name"] and '1/4"' in rows[2]["name"]
     assert "R2" in rows[-1]["name"]
+
+
+def test_old_excel_cell_keeps_text():
+    from pl.read import _num
+    assert _num("شیلنگ") == "شیلنگ"            # the old .xls reader must keep text cells (a helper once shadowed it)

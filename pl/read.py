@@ -328,7 +328,7 @@ def table_rows(f: Path) -> list[dict]:
     return out
 
 
-def _num(c) -> float | None:
+def _cell_num(c) -> float | None:
     if isinstance(c, (int, float)) and not isinstance(c, bool):
         return float(c)
     t = re.sub(r"[,٬\s]", "", str(c or "").translate(FA_DIGITS))
@@ -358,7 +358,7 @@ def headless_rows(vals: list[list]) -> list[dict]:
         cs = col(j)
         if len(cs) < len(rows) * 0.2:
             continue
-        nums = [_num(c) for c in cs]
+        nums = [_cell_num(c) for c in cs]
         if all(n is not None for n in nums):
             lens = {len(str(int(n))) for n in nums}
             if len(lens) == 1 and min(lens) >= 8 and len(cs) >= len(rows) * 0.8:
@@ -379,12 +379,12 @@ def headless_rows(vals: list[list]) -> list[dict]:
             continue
         if kind is not None and r[kind] is not None and str(r[kind]).strip() not in ("", "None"):
             last_kind = str(r[kind]).strip()
-        p = _num(r[price])
+        p = _cell_num(r[price])
         if p is None:
             continue
         parts = [nm] + ([last_kind] if kind is not None and last_kind else []) + (
             [str(r[size]).strip().replace("’’", '"').replace("”", '"')] if size is not None and r[size] is not None else [])
-        out.append({"brand": "", "model": str(int(_num(r[code]))) if code is not None and _num(r[code]) else "",
+        out.append({"brand": "", "model": str(int(_cell_num(r[code]))) if code is not None and _cell_num(r[code]) else "",
                     "name": " ".join(parts), "price": str(int(round(p))), "unit": "unknown", "stock": "", "vat": "",
                     "list_date": ""})
     return out
