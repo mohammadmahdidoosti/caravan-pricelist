@@ -64,9 +64,19 @@ def _other_brand(row: dict, offer: dict) -> str:
     ob = str(offer.get("brand") or "").strip()
     if not bw or not ob:
         return ""
-    if bw & words_nums(ob)[0] or _brand_hits(row, offer):
+    if bw & words_nums(ob)[0] or _brand_hits(row, offer) or _same_brand_text(row.get("brand") or "", ob):
         return ""                                    # same brand, or the list's brand is in the product's name
     return ob
+
+
+def _same_brand_text(a: str, b: str) -> bool:
+    """(26 Nov) The reader joins or misspells a brand: «آریاناتوین», «آریانوین» for «آریانا نوین». Compared without
+    spaces, close spellings are the same maker."""
+    from difflib import SequenceMatcher
+    x, y = (re.sub(r"\s+", "", norm_text(t)) for t in (a, b))
+    if len(x) < 4 or len(y) < 4:
+        return False
+    return x in y or y in x or SequenceMatcher(None, x, y).ratio() >= 0.75
 
 
 def _brand_guard(out: list[dict], by_id: dict) -> None:
@@ -97,6 +107,14 @@ def _brand_guard(out: list[dict], by_id: dict) -> None:
         else:
             res["status"] = "yellow"
         res["how"] = (res.get("how") or "") + "_guard"
+
+
+def _closest(row: dict, same: list[dict]) -> list[dict]:
+    """(26 Nov) Several products pass the name test (silver / gold, brushed / mirror, one / two metres of the same
+    panel). The one whose words are exactly the row's words, and alone in that, is the product."""
+    lw, ln = words_nums(row.get("name", ""))
+    exact = [o for o in same if o["_wn"][0] == lw and o["_wn"][1] == ln]
+    return exact if len(exact) == 1 else []
 
 
 def _head(name: str) -> str:
@@ -234,8 +252,9 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
                 res.update(status="yellow", how="model_many", cands=[_brief(o) for o in hits[:8]])
         if res["status"] == "new":
             same = _by_brand(r, [o for o in offers if same_by_name(o.get("name", ""), r.get("name", ""))])
-            if len(same) == 1:
-                res.update(status="green", how="name", offers=[_brief(same[0])])
+            best = _closest(r, same) if len(same) > 1 else []
+            if len(same) == 1 or best:
+                res.update(status="green", how="name", offers=[_brief((best or same)[0])])
             elif same:
                 res.update(status="yellow", how="name_many", cands=[_brief(o) for o in same[:8]])
             else:
