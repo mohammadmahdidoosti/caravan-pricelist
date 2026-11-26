@@ -73,6 +73,8 @@ def _words_nums(text: str) -> tuple[set, set]:
     t = norm_text(text)
     # right-to-left typing turns «سایز 1 1/4» into «سایز 1/4 1»
     t = re.sub(r"(سایز|سايز)\s+(\d+\s*/\s*\d+)\s+(\d+)(?![\d./])(?!\s*(?:متر|میل|cm|mm))", lambda m: f"{m.group(1)} {m.group(3)} {m.group(2)}", t)
+    # (26 Nov) a glued size «سایز 11/4» / «21/2» is «1 1/4» / «2 1/2» (no hose is eleven quarters of an inch)
+    t = re.sub(r"(سایز|سايز)\s*([1-9])(1/[248]|3/[48]|[57]/8)(?![\d/])", r"\1 \2 \3", t)
     # (26 Nov) Hydraparts hoses: «1 1/4» and «1/4» are two sizes; a fraction is one number («1-1/4», «1/4»), not 1 and 4
     fracs = {(f"{m.group(1)}-" if m.group(1) else "") + f"{m.group(2)}/{m.group(3)}" for m in _FRAC.finditer(t)}
     t = _FRAC.sub(" ", t)

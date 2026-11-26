@@ -204,3 +204,9 @@ def test_maker_is_whole_words():
     from pl.match import _has_words
     assert not _has_words("سیم", "شیلنگ یک لاسیم") and not _has_words("هیدرو", "شیلنگ هیدرولیک")
     assert _has_words("ال ام سی", "شیلنگ ال ام سی 1/2")
+
+
+def test_glued_inch_size():
+    from pl.text import words_nums
+    assert words_nums("شیلنگ نخدار روغن سمپریت سایز 11/4")[1] == words_nums("شیلنگ نخدار روغن سمپریت سایز 1 1/4")[1]
+    assert "1/4" in words_nums("شیلنگ سایز 1/4")[1]
