@@ -186,13 +186,18 @@ def _name_brands(offers: list[dict]) -> dict:
     return {"all": out}
 
 
+def _has_words(phrase: str, text: str) -> bool:
+    """Whole words only: the maker «سیم» is not in «لاسیم», «هیدرو» is not in «هیدرولیک»."""
+    return f" {phrase} " in f" {text} "
+
+
 def _same_maker(row: dict, offers: list[dict], brands: dict) -> list[dict]:
     """(26 Nov) Hydraparts sells LMC, Semperit, Chinese and «متفرقه» hoses of every size; the brand is in the row's
     name, not in a brand column. A row naming one of the seller's makers is matched only to that maker's products."""
     if not brands["all"]:
         return offers
     t = norm_text(f"{row.get('name', '')} {row.get('brand', '')}")
-    mine = {b for b in brands["all"] if b in t}
+    mine = {b for b in brands["all"] if _has_words(b, t)}
     # «ال ام سی» holds «ام سی» (another maker, MC): only the longest maker written in the row counts
     mine = {b for b in mine if not any(b != m and b in m for m in mine)}
     if not mine:
@@ -357,7 +362,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
     out, todo, usd = [], [], 0.0
     brands = _name_brands(offers)
     for o in offers:                                     # which of the makers each product carries, once
-        o["_mk"] = {m for m in brands["all"] if m == o["_nb"] or m in o["_nn"]}   # substring: «ال ام سی» in a name
+        o["_mk"] = {m for m in brands["all"] if m == o["_nb"] or _has_words(m, o["_nn"])}   # substring: «ال ام سی» in a name
     all_offers = offers
     for r in rows:
         offers = _same_maker(r, all_offers, brands)

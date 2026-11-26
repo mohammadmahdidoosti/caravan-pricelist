@@ -198,3 +198,9 @@ def test_maker_with_persian_and_latin_name():
     r = match([{"key": "N1", "name": "شيلنگ هيدروليك يك لاسيم سايز 1/2 ال ام سي 1/2\"", "model": "", "price": "700000",
                 "unit": "toman", "brand": ""}], lmc + mc + chi, use_model=False)["rows"][0]
     assert all(c["offer_id"] < 10 for c in r["cands"] + r["offers"])
+
+
+def test_maker_is_whole_words():
+    from pl.match import _has_words
+    assert not _has_words("سیم", "شیلنگ یک لاسیم") and not _has_words("هیدرو", "شیلنگ هیدرولیک")
+    assert _has_words("ال ام سی", "شیلنگ ال ام سی 1/2")
