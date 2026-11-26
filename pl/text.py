@@ -55,9 +55,20 @@ def contains_model(text: str, key: str) -> bool:
     return re.search(pat, t) is not None
 
 
+_FRAC = re.compile(r"(?<![\d.])(?:(\d+)\s+)?(\d+)\s*/\s*(\d+)(?![\d.])")
+
+
+COUNT_WORDS = {"یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "تک", "دوبل"}
+
+
 def words_nums(text: str) -> tuple[set, set]:
-    t = norm_text(text).replace("/", " / ").replace("*", " * ").replace("×", " × ")
-    nums = set(re.findall(r"\d+(?:\.\d+)?", t))
+    t = norm_text(text)
+    # right-to-left typing turns «سایز 1 1/4» into «سایز 1/4 1»
+    t = re.sub(r"(سایز|سايز)\s+(\d+\s*/\s*\d+)\s+(\d+)(?![\d./])(?!\s*(?:متر|میل|cm|mm))", lambda m: f"{m.group(1)} {m.group(3)} {m.group(2)}", t)
+    # (26 Nov) Hydraparts hoses: «1 1/4» and «1/4» are two sizes; a fraction is one number («1-1/4», «1/4»), not 1 and 4
+    fracs = {(f"{m.group(1)}-" if m.group(1) else "") + f"{m.group(2)}/{m.group(3)}" for m in _FRAC.finditer(t)}
+    t = _FRAC.sub(" ", t).replace("/", " / ").replace("*", " * ").replace("×", " × ")
+    nums = set(re.findall(r"\d+(?:\.\d+)?", t)) | fracs
     words = {w for w in t.split() if not re.search(r"\d", w) and len(w) > 1 and w not in GENERIC_WORDS}
     return words, nums
 
@@ -69,6 +80,10 @@ def same_by_name(product_name: str, list_name: str) -> bool:
     # (26 Nov) «ورق 0.7» is read as «ورق 7» from small print: a «0.x» of the product also answers a row's «x»
     pn = pn | {n[2:] for n in pn if n.startswith("0.")}
     if not lw or not pw or not ln <= pn:
+        return False
+    # (26 Nov) «یک لاسیم» is not «دو لاسیم»: number words written in both names must be the same
+    rc, pc = lw & COUNT_WORDS, pw & COUNT_WORDS
+    if rc and pc and rc != pc:
         return False
     return len(lw & pw) >= 0.8 * len(lw) and len(lw & pw) >= 0.6 * len(pw)
 

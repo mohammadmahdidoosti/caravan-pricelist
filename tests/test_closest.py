@@ -134,3 +134,20 @@ def test_headless_sheet():
 def test_old_excel_cell_keeps_text():
     from pl.read import _num
     assert _num("شیلنگ") == "شیلنگ"            # the old .xls reader must keep text cells (a helper once shadowed it)
+
+
+def test_hose_wires_and_fraction_sizes():
+    from pl.text import same_by_name, words_nums
+    p2 = "شیلنگ هیدرولیک دو لاسیم سایز 1/4 1 ال ام سی R2-1 1/4 LMC"
+    assert not same_by_name(p2, "شيلنگ هيدروليك يك لاسيم سايز 1 1/4 ال ام سي")       # one wire is not two
+    assert "1-1/4" in words_nums("سایز 1 1/4")[1] and "1/4" in words_nums("سایز 1/4")[1]
+    assert not same_by_name("شیلنگ هیدرولیک دو لاسیم سایز 1/4 ال ام سی", "شیلنگ هیدرولیک دو لاسیم سایز 1 1/4 ال ام سی")
+    assert same_by_name("شیلنگ هیدرولیک دو لاسیم سایز 1 1/4 ال ام سی LMC", "شيلنگ هيدروليك دو لاسيم سايز 1 1/4 ال ام سي")
+
+
+def test_reversed_size_and_one_quarter_row():
+    from pl.text import same_by_name, words_nums
+    assert "1-1/4" in words_nums("شیلنگ دو لاسیم سایز 1/4 1 ال ام سی")[1]
+    p = "شیلنگ هیدرولیک دو لاسیم سایز 1/4 1 ال ام سی R2-1 1/4 LMC"
+    assert not same_by_name(p, "شيلنگ هيدروليك دو لاسيم سايز 1/4 ال ام سي 1/4\"")
+    assert same_by_name(p, "شيلنگ هيدروليك دو لاسيم سايز 1/4 1 ال ام سي 1 1/4\"")
