@@ -225,3 +225,13 @@ def test_pdf_text_line_settles_price(tmp_path):
     _check_with_text([f], rows, "rial")
     assert rows[0]["price"] == "19,100,000" and "PDF" in rows[0]["check"]
     assert rows[1]["price"] == "26,700,000" and "check" not in rows[1]
+
+
+def test_brands_settle_to_the_maker():
+    from pl.read import settle_brands
+    rows = [{"brand": "ASTI", "name": f"کلید مینیاتوری ETIMAT 10 B {a}A"} for a in range(1, 9)] + \
+           [{"brand": "ETI", "name": f"فیوز سیلندری CH10X38 {a}A"} for a in range(1, 9)] + \
+           [{"brand": "ETIBREAK", "name": f"کلید اتوماتیک EB2 {a}"} for a in range(1, 7)] + \
+           [{"brand": "LS", "name": "کنتاکتور MC-9"}]
+    out = settle_brands(rows)
+    assert all(r["brand"] == "ETI" for r in out[:22]) and out[-1]["brand"] == "LS"

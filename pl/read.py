@@ -761,6 +761,33 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
             pass
 
 
+def settle_brands(rows: list[dict]) -> list[dict]:
+    """(26 Nov) Fuse Central's ETI catalog came back with brands «ASTI» (451 rows: the logo misread), «ETI» (407) and the
+    series names «ETIBREAK», «ETICON», «ETIMAT», «ETISWITCH». A series named after its maker is the maker; a row whose
+    brand is in none of its words while its name carries a series of the list's main maker is that maker's."""
+    from collections import Counter
+    up = lambda b: re.sub(r"[^A-Z0-9]", "", str(b or "").upper())
+    cnt = Counter(up(r.get("brand")) for r in rows if up(r.get("brand")))
+    mains = [b for b, n in cnt.most_common() if n >= 5 and len(b) >= 3]
+    for r in rows:
+        b = up(r.get("brand"))
+        m = next((x for x in mains if x != b and b.startswith(x)), None)
+        if m:
+            r["brand"] = m
+    cnt = Counter(up(r.get("brand")) for r in rows if up(r.get("brand")))
+    if not cnt:
+        return rows
+    top, n = cnt.most_common(1)[0]
+    if n < 0.3 * len(rows) or len(top) < 3:
+        return rows
+    for r in rows:
+        b = up(r.get("brand"))
+        words = [up(w) for w in str(r.get("name") or "").split()]
+        if b and b != top and not any(w.startswith(b) for w in words if w) and any(w.startswith(top) for w in words if w):
+            r["brand"] = top
+    return rows
+
+
 def merge(rows: list[dict], unit_hint: str = "auto") -> list[dict]:
     """One row per model (or per name); the newest list's price wins, a different price on the same date is noted."""
     by: dict[str, dict] = {}
@@ -800,4 +827,4 @@ def merge(rows: list[dict], unit_hint: str = "auto") -> list[dict]:
             by[k] = row
         elif b == a and row["toman"] and old["toman"] and row["toman"] != old["toman"]:
             old["note"] = "؛ ".join(x for x in (old["note"], f"جای دیگر {row['toman']:,} خوانده شد؛ بررسی کنید") if x)
-    return list(by.values())
+    return settle_brands(list(by.values()))
