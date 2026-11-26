@@ -689,10 +689,29 @@ def cross_check(rows: list[dict], second: dict | None) -> None:
             r["check"] = f"قیمت در خواندن دوم {seen[k]} خوانده شد؛ بررسی کنید"
 
 
+def _line_prices(tp, W: float, code: str) -> list[int] | None:
+    """The prices printed on the line of the page that carries this code (comma-grouped numbers only, so a pack
+    size like «12/108» is not one), or None when the code is not in the page's text."""
+    s = tp.search(code, match_case=False)
+    hit = s.get_next()
+    if not hit:
+        return None
+    i, n = hit
+    boxes = [tp.get_charbox(j) for j in range(i, i + n)]
+    y0, y1 = min(b[1] for b in boxes), max(b[3] for b in boxes)
+    line = str(tp.get_text_bounded(0, y0 - 1, W, y1 + 1) or "").translate(FA_DIGITS).replace("٬", ",")
+    return [int(g.replace(",", "")) for g in re.findall(r"(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])", line)]
+
+
 def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> None:
     """A PDF with a text layer: a price read from the picture must be printed on its page (as read, or as toman
-    or rial of it). Rows whose price is not there get a note and wait for a person."""
+    or rial of it). Rows whose price is not there get a note and wait for a person.
+    (26 Nov) Fuse Central's ETI catalog: the picture read gave 19,200,000 where the page prints 19,100,000, and the
+    second reading disagreed with the first on 11 rows. The text layer is the catalog itself: the price on the line
+    that carries the row's code wins, and the note says so."""
     texts: dict[str, set] = {}
+    pages: dict[str, tuple] = {}
+    docs = []
     t0 = time.monotonic()
     for f in files:
         if not f.name.lower().endswith(".pdf"):
@@ -702,13 +721,15 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
             # catalog (25 Nov 2026) and the job sat at 80%. A text check is a bonus: it stops after 90 seconds.
             import pypdfium2 as pdfium
             pdf = pdfium.PdfDocument(str(f))
+            docs.append(pdf)
             for i in range(len(pdf)):
                 if time.monotonic() - t0 > 90:
                     log.warning("text check stopped after 90s at %s page %d", f.name, i + 1)
                     break
                 tp = pdf[i].get_textpage()
-                texts[f"{f.name} ص{i + 1}"] = page_nums(tp.get_text_range() or "")
-            pdf.close()
+                label = f"{f.name} ص{i + 1}"
+                texts[label] = page_nums(tp.get_text_range() or "")
+                pages[label] = (tp, pdf[i].get_size()[0])
         except Exception as e:                           # noqa: BLE001
             log.warning("text check %s: %s", f.name, e)
             continue
@@ -717,8 +738,27 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
         if not nums:
             continue
         raw = re.sub(r"\D", "", str(r.get("price") or "").translate(FA_DIGITS))
+        code = str(r.get("model") or "").strip()
+        if raw and len(code) >= 5 and re.search(r"\d", code) and r.get("file") in pages:
+            try:
+                got = _line_prices(*pages[r["file"]], code)
+            except Exception as e:                       # noqa: BLE001
+                log.warning("line price %s: %s", code, e)
+                got = None
+            if got is not None and len(got) == 1:
+                if int(raw) != got[0]:
+                    r["price"] = f"{got[0]:,}"
+                    r["check"] = f"قیمت از متن خود PDF برداشته شد ({got[0]:,}؛ از روی تصویر {int(raw):,} خوانده شده بود)"
+                elif "خواندن دوم" in str(r.get("check") or ""):
+                    r.pop("check", None)                 # the page's text agrees with the first reading
+                continue
         if raw and int(raw) not in nums and int(raw) * 10 not in nums and int(raw) // 10 not in nums:
             r["check"] = "قیمت خوانده‌شده در متن صفحه پیدا نشد؛ بررسی کنید"
+    for pdf in docs:
+        try:
+            pdf.close()
+        except Exception:                                # noqa: BLE001
+            pass
 
 
 def merge(rows: list[dict], unit_hint: str = "auto") -> list[dict]:
