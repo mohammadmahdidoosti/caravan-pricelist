@@ -30,6 +30,10 @@ only: {"pick": <number of the candidate>, "why": "<few words>"} or {"pick": null
 Pick a candidate ONLY when all of these hold:
 - it is the SAME product as the catalog picture and the product name (same shape, colour and kind; a different model
   of the same family is NOT the same product);
+- the maker: when the product name has a brand (e.g. دزلی / Dezli) and the candidate shows another maker's name or logo
+  ON the product (e.g. «POWER SMART» printed on a battery), it is NOT the same product; a generic item of another
+  maker that only looks alike is NOT the same product either;
+- its colour matches the catalog picture (a black battery is not the catalog's red battery);
 - it shows the product itself, alone or nearly alone (not a poster, a price list, a box of many items, a person);
 - no other shop's logo, watermark, phone number, website or price is printed over or beside the product (the
   maker's own logo ON the product is fine).
@@ -104,7 +108,7 @@ def find(name: str, crop: Image.Image | None, model: str | None = None) -> tuple
         content.append(llm.image_part(_jpeg(im)))
     j, usd = llm.ask([{"role": "system", "content": PICK_SYSTEM}, {"role": "user", "content": content}],
                      max_tokens=200, title="Caravan product photo", model_id=model or os.environ.get(
-                         "PL_MODEL_LITE", "google/gemini-2.5-flash-lite"))
+                         "PL_MODEL_STRONG", "google/gemini-2.5-flash"))   # a wrong pick costs more than the call
     try:
         k = int((j or {}).get("pick"))
     except (TypeError, ValueError):
