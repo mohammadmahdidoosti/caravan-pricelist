@@ -176,3 +176,12 @@ def test_maker_written_in_names_and_length_ranges():
     r = match([{"key": "N1", "name": "شيلنگ هيدروليك يك لاسيم سايز 1 ال ام سي 1\"", "model": "", "price": "700000",
                 "unit": "toman", "brand": ""}], lmc + chi, use_model=False)["rows"][0]
     assert all(c["offer_id"] < 10 for c in r["cands"] + r["offers"])
+
+
+def test_makers_learnt_without_brand_field():
+    from pl.match import _name_brands
+    lmc = [{"name": f"شیلنگ هیدرولیک چهارلاسیم سایز {s} ال ام سی 4SH-{s} LMC", "brand": ""} for s in ["1", "3/4", "1/2", "3/8", "1/4", "5/8"]]
+    chi = [{"name": f"شیلنگ هیدرولیک دو لاسیم سایز {s} چینی", "brand": ""} for s in ["1", "3/4", "1/2", "3/8", "1/4"]]
+    fit = [{"name": f"اتصال پنوماتیک سایز {s}", "brand": ""} for s in ["1", "3/4", "1/2", "3/8", "1/4"]]
+    got = _name_brands(lmc + chi + fit)["all"]
+    assert "lmc" in got and "ال ام سی" in got and "چینی" in got and "سایز" not in got and "پنوماتیک" not in got

@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import llm
 import math
 
-from .text import to_toman, contains_model, norm_text, same_by_name, weak_key, words_nums
+from .text import COUNT_WORDS, to_toman, contains_model, norm_text, same_by_name, weak_key, words_nums
 
 log = logging.getLogger(__name__)
 
@@ -128,12 +128,26 @@ def _name_brands(offers: list[dict]) -> dict:
     names say «ال ام سی», so for each brand the phrase (1-3 words) found in most of its names and rarely in the others
     is taken, besides the brand itself."""
     from collections import Counter
-    skip = {"", "متفرقه", "سایر", "نامشخص", "بدون برند"}
+    skip = {"", "متفرقه", "سایر", "نامشخص", "بدون برند", "اینچ", "سایز", "میل", "متر", "عدد"}
     groups: dict[str, list[str]] = {}
-    for o in offers:
+    names_all = [o.get("_nn") if "_nn" in o else norm_text(o.get("name", "")) for o in offers]
+    # (26 Nov) Hydraparts' LMC hoses have no brand set: the maker is only the last word of the name («... LMC»).
+    # The last word without digits of a brandless name is a maker when it closes at least 5 names and is hardly
+    # ever written anywhere else in the names (so «سایز» or «اینچ» are not makers).
+    word_in = Counter(w for n in names_all for w in set(n.split()))
+    last = Counter()
+    lasts = []
+    for o, n in zip(offers, names_all):
         b = o.get("_nb") if "_nb" in o else norm_text(o.get("brand") or "")
+        w = next((x for x in reversed(n.split()) if not any(ch.isdigit() for ch in x) and len(x) >= 2), "") if not b else ""
+        lasts.append(w)
+        last[w] += 1
+    for o, n, w in zip(offers, names_all, lasts):
+        b = o.get("_nb") if "_nb" in o else norm_text(o.get("brand") or "")
+        if not b and w and w not in skip and last[w] >= 5 and word_in[w] <= 1.2 * last[w]:
+            b = w
         if b not in skip:
-            groups.setdefault(b, []).append(o.get("_nn") if "_nn" in o else norm_text(o.get("name", "")))
+            groups.setdefault(b, []).append(n)
     total = Counter()
     per: dict[str, Counter] = {}
     for b, names in groups.items():
@@ -154,7 +168,16 @@ def _name_brands(offers: list[dict]) -> dict:
                 and not any(ch.isdigit() for ch in g)
                 and all(total[w] - per[b][w] <= 0.1 * per[b][w] for w in g.split())]
         if good:
-            out.add(max(good, key=lambda g: (per[b][g], len(g))))
+            # a maker is written near the end of a name («... ال ام سی 4SH-1 LMC»), a kind of product near the start
+            def tail(g: str) -> float:
+                pos = [n.find(g) / max(len(n), 1) for n in names if g in n]
+                return sum(pos) / len(pos) if pos else 0.0
+            good = [g for g in good if not set(g.split()) & COUNT_WORDS] or good
+            good = [g for g in good if g not in b and b not in g]  # the brand itself is already in
+            good = [g for g in good if tail(g) >= 0.5]  # «لاسیم» (a kind) is in the first half, «ال ام سی» after it
+            good = [g for g in good if not any(g != h and g in h and per[b][h] >= per[b][g] for h in good)]
+            if good:
+                out.add(max(good, key=lambda g: (round(tail(g), 1), per[b][g], len(g))))
     return {"all": out}
 
 
@@ -327,7 +350,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
     out, todo, usd = [], [], 0.0
     brands = _name_brands(offers)
     for o in offers:                                     # which of the makers each product carries, once
-        o["_mk"] = {m for m in brands["all"] if m == o["_nb"] or m in o["_nn"]}
+        o["_mk"] = {m for m in brands["all"] if m == o["_nb"] or m in o["_nn"]}   # substring: «ال ام سی» in a name
     all_offers = offers
     for r in rows:
         offers = _same_maker(r, all_offers, brands)
