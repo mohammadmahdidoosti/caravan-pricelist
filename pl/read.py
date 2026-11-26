@@ -10,7 +10,9 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 import re
+import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
@@ -65,6 +67,28 @@ TEXT_USER = "Read every priced product of this price list (a spreadsheet as text
 STOCK_WORDS = ("موجودی", "وضعیت", "موجود", "stock", "available")
 NO_STOCK = re.compile(r"ناموجود|نا موجود|عدم موجود|اتمام|تمام شد|out\s*of\s*stock|^\s*(0|no|خیر|✗|×|-)\s*$", re.I)
 PICTURE_EXT = (".jpg", ".jpeg", ".png", ".webp")
+
+# (26 Nov) The reading ladder: every page is read by the main model (PL_MODEL, cheap). A page whose reading looks
+# wrong (the second reading disagrees, a price with too few digits, or after matching many prices far from the
+# site's) is read again by the next model, up to the strong one. Each step is paid only for the pages that need it.
+LITE = os.environ.get("PL_MODEL_LITE", "google/gemini-2.5-flash-lite")
+STRONG = os.environ.get("PL_MODEL_STRONG", "google/gemini-2.5-flash")
+SMALL_SIDE = 1600       # a picture smaller than this on its long side is enlarged (and cut in strips) before reading
+
+
+def ladder() -> list[str]:
+    out = []
+    for m in (llm.model(), LITE, STRONG):
+        if m and m not in out:
+            out.append(m)
+    return out if os.environ.get("PL_ESCALATE", "1") != "0" else out[:1]
+
+
+def stage_name(model: str) -> str:
+    """'main' / 'lite' / 'strong': the key its cost is counted under."""
+    if model == llm.model():
+        return "read"
+    return "lite" if model == LITE else "strong"
 TABLE_EXT = (".xlsx", ".xlsm", ".xls", ".csv")
 
 
@@ -99,6 +123,30 @@ def _fit(pic: bytes, side: int = 2200) -> bytes:
         return buf.getvalue()
     except Exception:                                    # noqa: BLE001 - send it as it came
         return pic
+
+
+def prepare(pic: bytes) -> list[bytes]:
+    """(26 Nov) A small picture (a 600 px poster from a messenger) is enlarged 2.5 times before reading, and a tall one
+    is cut in 3 overlapping strips: at its own size every model dropped digits of the prices («۱۴/۷۵۰/۰۰۰» read as
+    1750000); enlarged and in strips they were read whole. A big picture or a PDF page goes as it is."""
+    try:
+        from PIL import Image
+        im = Image.open(io.BytesIO(pic)).convert("RGB")
+    except Exception:                                    # noqa: BLE001
+        return [pic]
+    side = max(im.size)
+    if side >= SMALL_SIDE:
+        return [pic]
+    f = min(2.5, 2600 / side)
+    im = im.resize((int(im.width * f), int(im.height * f)), Image.LANCZOS)
+    n = 3 if im.height > 1.3 * im.width else 1
+    out, step = [], im.height / n
+    for i in range(n):
+        a, b = max(0, int(i * step - 0.08 * step)), min(im.height, int((i + 1) * step + 0.08 * step))
+        buf = io.BytesIO()
+        im.crop((0, a, im.width, b)).save(buf, "JPEG", quality=92)
+        out.append(buf.getvalue())
+    return out
 
 
 # ------------------------------------------------------------------ spreadsheets
@@ -317,7 +365,7 @@ def _rows_of(j: dict | None, label: str) -> list[dict]:
 def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dict:
     """Every file -> merged rows. {'rows': [...], 'usd': .., 'calls': .., 'failed': [...], 'pages': ..}"""
     rows, usd, calls, failed, pics = [], 0.0, 0, [], []
-    check_usd = 0.0                                  # the second reading's share of usd
+    spent: dict[str, float] = {}                     # dollars per stage: read, check, lite, strong
     for f in files:
         low = f.name.lower()
         try:
@@ -346,30 +394,181 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
             log.warning("read %s: %s", f.name, e)
             failed.append(f"{f.name}: {e}"[:200])
 
-    def look(x):
-        _, label, pic, mime = x
-        j, c = llm.ask([{"role": "system", "content": VISION_SYSTEM},
-                        {"role": "user", "content": [{"type": "text", "text": "Read every priced product of this price list."},
-                                                     llm.image_part(pic, mime)]}], max_tokens=8000)
-        # a second, independent reading of codes and prices only: a misread digit or an invented row shows up
-        k, c2 = llm.ask([{"role": "system", "content": CHECK_SYSTEM},
-                         {"role": "user", "content": [{"type": "text", "text": "List every model code and its price."},
-                                                      llm.image_part(pic, mime)]}], max_tokens=6000)
-        return label, j, c, c2, k
+    pages: dict[str, dict] = {}
+
+    def first(x):
+        f, label, pic, mime = x
+        parts = prepare(pic) if f.name.lower().endswith(PICTURE_EXT) else [pic]
+        pg = {"label": label, "parts": parts, "readings": [], "stage": 0, "file": f}
+        cost = read_stage(pg, ladder()[0])
+        return label, pg, cost
     with ThreadPoolExecutor(4) as ex:
-        for n, (label, j, c, c2, k) in enumerate(ex.map(look, pics), 1):
-            usd, calls, check_usd = usd + c + c2, calls + 2, check_usd + c2
-            if j is None:
+        for n, (label, pg, cost) in enumerate(ex.map(first, pics), 1):
+            for k, v in cost.items():
+                spent[k] = spent.get(k, 0.0) + v
+            calls += pg.pop("_calls", 0)
+            pages[label] = pg
+            if pg["readings"] and pg["readings"][0][1] is None:
                 failed.append(f"{label}: خوانده نشد")
-            got = _rows_of(j, label)
-            cross_check(got, k)
-            rows += got
             if progress:
                 progress(n, len(pics))
+    # pages whose reading looks wrong go up the ladder (in parallel, each page at its own pace)
+    todo = [pg for pg in pages.values() if bad_rows(pg["rows"])]
+    if todo:
+        with ThreadPoolExecutor(4) as ex:
+            for cost, c in ex.map(lambda pg: climb(pg), todo):
+                for k, v in cost.items():
+                    spent[k] = spent.get(k, 0.0) + v
+                calls += c
+    for pg in pages.values():
+        rows += pg["rows"]
     _check_with_text(files, rows, unit_hint)
     items = merge(rows, unit_hint)
-    return {"rows": items, "usd": round(usd, 4), "calls": calls, "failed": failed, "pages": len(pics),
-            "cost": {"read": round(usd - check_usd, 4), "check": round(check_usd, 4)}}
+    spent["read"] = spent.get("read", 0.0) + usd     # the sheets read as text
+    return {"rows": items, "usd": round(sum(spent.values()), 4), "calls": calls, "failed": failed, "pages": len(pics),
+            "cost": {k: round(v, 4) for k, v in spent.items()}, "ladder": ladder_report(pages), "_pages": pages,
+            "_raw": rows}
+
+
+def remerge(got: dict, unit_hint: str = "auto") -> None:
+    """After some pages were read again: the list's rows from the pages' current readings."""
+    rows = [r for r in got["_raw"] if r.get("file") not in got["_pages"]]
+    for pg in got["_pages"].values():
+        rows += pg["rows"]
+    _check_with_text(list(dict.fromkeys(pg["file"] for pg in got["_pages"].values())), rows, unit_hint)
+    got["rows"] = merge(rows, unit_hint)
+    got["ladder"] = ladder_report(got["_pages"])
+
+
+def ladder_report(pages: dict) -> dict:
+    """How many pages ended at each model, and which pages went up (for the review page)."""
+    out: dict = {"models": ladder(), "pages": {}}
+    for pg in pages.values():
+        m = pg["readings"][-1][0] if pg["readings"] else ""
+        out["pages"][stage_name(m) if m else "read"] = out["pages"].get(stage_name(m) if m else "read", 0) + 1
+    out["up"] = [{"page": pg["label"], "models": [x[0] for x in pg["readings"]], "why": pg.get("why", "")}
+                 for pg in pages.values() if len(pg["readings"]) > 1][:50]
+    return out
+
+
+def _ask_parts(parts: list[bytes], system: str, text: str, model: str, max_tokens: int) -> tuple[list[dict], float, int, bool]:
+    """One reading of a page (all its strips): the rows of every strip, cost, calls, whether every strip answered."""
+    out, usd, ok = [], 0.0, True
+    for p in parts:
+        j, c = llm.ask([{"role": "system", "content": system},
+                        {"role": "user", "content": [{"type": "text", "text": text}, llm.image_part(p, "image/jpeg")]}],
+                       max_tokens=max_tokens, model_id=None if model == llm.model() else model)
+        usd += c
+        if j is None:
+            ok = False
+        out.append(j)
+    return out, usd, len(parts), ok
+
+
+def _page_rows(answers: list, label: str) -> list[dict]:
+    """Rows of all strips; a row read twice where two strips overlap is kept once."""
+    rows, seen = [], set()
+    for j in answers:
+        for r in _rows_of(j, label):
+            k = row_key(r.get("model", ""), r.get("name", ""))
+            if k and k in seen:
+                continue
+            seen.add(k)
+            rows.append(r)
+    return rows
+
+
+def read_stage(pg: dict, model: str) -> dict:
+    """Read the page with this model (and, for the main model, a second independent reading of codes and prices)."""
+    answers, usd, calls, ok = _ask_parts(pg["parts"], VISION_SYSTEM, "Read every priced product of this price list.",
+                                         model, 8000)
+    rows = _page_rows(answers, pg["label"])
+    cost = {stage_name(model): usd}
+    if not pg["readings"]:
+        # a second, independent reading of codes and prices only: a misread digit or an invented row shows up
+        k_answers, c2, n2, _ = _ask_parts(pg["parts"], CHECK_SYSTEM, "List every model code and its price.", model, 6000)
+        k = {"rows": [r for j in k_answers if isinstance(j, dict) for r in (j.get("rows") or []) if isinstance(r, dict)]}
+        pg["check"] = k
+        cross_check(rows, k)
+        cost["check"] = c2
+        calls += n2
+    pg["readings"].append((model, rows if ok or rows else None))
+    pg["rows"] = vote(pg) if len(pg["readings"]) > 1 else rows
+    if len(pg["readings"]) == 1:
+        digit_check(pg["rows"])
+    pg["_calls"] = pg.get("_calls", 0) + calls
+    return cost
+
+
+def climb(pg: dict, why: str = "") -> tuple[dict, int]:
+    """Read the page with the next models of the ladder until its rows look right (or the ladder ends)."""
+    spent: dict[str, float] = {}
+    pg["_calls"] = 0
+    if why:
+        pg["why"] = why
+    elif not pg.get("why"):
+        n = bad_rows(pg["rows"])
+        pg["why"] = f"{n} ردیف مشکوک (دو خواندن یکی نبود یا رقم قیمت کم بود)"
+    models = ladder()
+    while len(pg["readings"]) < len(models):
+        cost = read_stage(pg, models[len(pg["readings"])])
+        for k, v in cost.items():
+            spent[k] = spent.get(k, 0.0) + v
+        if not bad_rows(pg["rows"]):
+            break
+    return spent, pg.pop("_calls", 0)
+
+
+def bad_rows(rows: list[dict]) -> int:
+    return sum(1 for r in rows if r.get("check"))
+
+
+def _prices_by_key(rows) -> dict[str, str]:
+    out = {}
+    for r in rows or []:
+        k = model_key(r.get("model"))
+        d = _digits(r.get("price"))
+        if len(k) >= 3 and d:
+            out.setdefault(k, d)
+    return out
+
+
+def vote(pg: dict) -> list[dict]:
+    """The newest (stronger) reading's rows; a price it shares with an earlier reading is confirmed, one no other
+    reading saw is noted for a person."""
+    model, rows = pg["readings"][-1]
+    rows = [dict(r) for r in (rows or [])]
+    for r in rows:
+        r.pop("check", None)
+    earlier = [_prices_by_key(x[1]) for x in pg["readings"][:-1]]
+    k_rows = pg.get("check") or {}
+    earlier.append({model_key(x.get("model")): _digits(x.get("price")) for x in k_rows.get("rows", [])
+                    if isinstance(x, dict) and len(model_key(x.get("model"))) >= 3 and _digits(x.get("price"))})
+    digit_check(rows)
+    last = len(pg["readings"]) >= len(ladder())
+    for r in rows:
+        if r.get("check"):
+            continue
+        k, d = model_key(r.get("model")), _digits(r.get("price"))
+        if len(k) < 3 or not d:
+            continue
+        others = [e[k] for e in earlier if e.get(k)]
+        if others and d not in others:
+            r["check"] = ("خواندن‌های مختلف قیمت را یکی نخواندند (" + "، ".join(sorted(set(others))) + ")؛ بررسی کنید"
+                          if last else "خواندن‌ها یکی نبود")
+    return rows
+
+
+def digit_check(rows: list[dict]) -> None:
+    """A price with two or more digits fewer than most prices of its page is a misread (a dropped «۰۰۰» group)."""
+    lens = [len(_digits(r.get("price"))) for r in rows if _digits(r.get("price"))]
+    if len(lens) < 4:
+        return
+    med = statistics.median(lens)
+    for r in rows:
+        d = _digits(r.get("price"))
+        if d and len(d) <= med - 2 and not r.get("check"):
+            r["check"] = "رقم‌های این قیمت از قیمت‌های دیگر صفحه کمتر است؛ بررسی کنید"
 
 
 def _digits(p) -> str:

@@ -31,7 +31,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from pl import llm
 from pl.match import match, unmatched_offers
-from pl.read import read_files
+from pl.read import climb, ladder, read_files, remerge
 from pl.spell import fix_names
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -99,6 +99,9 @@ def _startup() -> None:
         log.warning("marked %d interrupted job(s) as failed", n)
 
 
+FAR_PCT = int(os.environ.get("PL_FAR_PCT", "60"))
+
+
 def _run(job: Path, meta: dict) -> None:
     try:
         files = sorted((job / "files").iterdir())
@@ -110,6 +113,29 @@ def _run(job: Path, meta: dict) -> None:
         offers = meta.get("offers") or []
         fix_names(got["rows"], offers)               # a word misread from a fancy title font
         m = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
+        # (26 Nov) a page with many prices far from the seller's current ones is read again by the next model of
+        # the ladder (a whole poster read with its first digits dropped looked «-95%» on every row)
+        far: dict[str, list] = {}
+        for r in m["rows"]:
+            if r.get("change_pct") is not None:
+                far.setdefault(r.get("file", ""), []).append(abs(r["change_pct"]) >= FAR_PCT)
+        again = [pg for label, pg in got["_pages"].items()
+                 if len(pg["readings"]) < len(ladder()) and sum(far.get(label, [])) >= 2
+                 and sum(far.get(label, [])) * 2 >= len(far.get(label, []))]
+        if again:
+            _save(job, {"status": "reading", "progress": 0.82})
+            for pg in again:
+                n = sum(far.get(pg["label"], []))
+                cost, c = climb(pg, f"{n} قیمت بیش از {FAR_PCT}٪ با قیمت فعلی فروشنده فرق داشت")
+                for k, v in cost.items():
+                    got["cost"][k] = round(got["cost"].get(k, 0.0) + v, 4)
+                got["calls"] += c
+            got["usd"] = round(sum(got["cost"].values()), 4)
+            remerge(got, meta.get("unit_hint") or "auto")
+            fix_names(got["rows"], offers)
+            m2 = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
+            m2["usd"] = round(m["usd"] + m2["usd"], 4)
+            m = m2
         miss = unmatched_offers(m["rows"], offers)
         result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": miss[:300], "not_in_list_count": len(miss),
                   "failed": got["failed"], "pages": got["pages"], "calls": got["calls"],
@@ -117,7 +143,8 @@ def _run(job: Path, meta: dict) -> None:
                   # where the money went: first reading, second (check) reading, matching; and who answered
                   "cost": {**got.get("cost", {}), "match": round(m["usd"], 4)},
                   "served": {k: v - served0.get(k, 0) for k, v in llm.SERVED.items() if v - served0.get(k, 0) > 0},
-                  "provider": ",".join((llm.provider() or {}).get("order", [])) or "auto"}
+                  "provider": ",".join((llm.provider() or {}).get("order", [])) or "auto",
+                  "ladder": got.get("ladder", {})}
         (job / "result.json").write_text(json.dumps(result, ensure_ascii=False))
         _save(job, {"status": "done", "progress": 1, "done_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "counts": m["counts"], "usd": result["usd"]})

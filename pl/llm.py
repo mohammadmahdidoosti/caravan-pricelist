@@ -36,14 +36,15 @@ def has_key() -> bool:
     return bool(os.environ.get("OPENROUTER_API_KEY"))
 
 
-def ask(messages: list, max_tokens: int = 4000, title: str = "Caravan supplier price list") -> tuple[dict | None, float]:
-    """(answer JSON or None, cost in dollars)."""
+def ask(messages: list, max_tokens: int = 4000, title: str = "Caravan supplier price list",
+        model_id: str | None = None) -> tuple[dict | None, float]:
+    """(answer JSON or None, cost in dollars). model_id: another model than PL_MODEL for this one call."""
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
-    body = {"model": model(), "max_tokens": max_tokens, "temperature": 0, "reasoning": {"enabled": False},
+    body = {"model": model_id or model(), "max_tokens": max_tokens, "temperature": 0, "reasoning": {"enabled": False},
             "response_format": {"type": "json_object"}, "messages": messages, "usage": {"include": True}}
-    if provider():
+    if provider() and not model_id:                     # the pinned providers serve the main model only
         body["provider"] = provider()
     for attempt in range(3):
         try:
