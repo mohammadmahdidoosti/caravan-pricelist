@@ -55,7 +55,10 @@ digits with a slash or a dot instead of a comma: «۱/۴۹۹/۰۰۰» or 1.499.0
 point or drop a group. When a row has several prices for buyers, copy the consumer price (مصرف کننده / خرده) rather than
 the dealer price (همکار / عمده), and the price WITHOUT VAT rather than with it. The unit comes from the words near the
 prices (ریال = rial, تومان = toman, هزار تومان = thousand_toman); a note such as «قیمت‌ها به ریال» applies to the page.
-Leave out cartons, counts, row numbers, phone numbers and other numbers that are not the price. No prose, only the JSON."""
+Leave out cartons, counts, row numbers, phone numbers and other numbers that are not the price. A code inside Persian
+text («میل سوپاپ ۱۰۱۳-۴») keeps its digit groups in the order a reader sees them left to right (1013-4): never split a
+group or reorder the groups. A shop photo of a part with no price on it is still a row, with an empty price. No prose,
+only the JSON."""
 
 CHECK_SYSTEM = """You check a price list page. Return JSON only: {"rows": [{"model": "<model code exactly as printed>",
  "price": "<its price digits exactly as printed, or empty>"}]} for EVERY row that has a model code, in page order. Read
