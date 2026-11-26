@@ -39,3 +39,11 @@ def test_null_pick_gives_nothing(monkeypatch):
 def test_square_is_webp():
     data = square(Image.new("RGB", (400, 300), "red"))
     assert Image.open(io.BytesIO(data)).size == (1000, 1000)
+
+
+def test_branded_product_keeps_only_its_brand_pages():
+    from pl.websearch import _of_brand
+    c = [{"title": "پنل آسانسور آتی پنل", "host": "atipanel.com"},
+         {"title": "شستی کابین آریانا نوین اکونومی", "host": "torob.com"}]
+    assert [x["host"] for x in _of_brand("شستی اکونومی برند آریانا نوین", c)] == ["torob.com"]
+    assert len(_of_brand("شستی اکونومی", c)) == 2

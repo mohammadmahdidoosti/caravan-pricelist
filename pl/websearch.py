@@ -92,11 +92,23 @@ def _jpeg(im: Image.Image, side: int = 768) -> bytes:
     return buf.getvalue()
 
 
+def _of_brand(name: str, cands: list[dict]) -> list[dict]:
+    """(26 Nov) «... برند آریانا نوین»: only pictures whose page names that brand. Ariana Novin's economy panels got
+    photos of Atipanel and Asialift panels (one panel looks like another; the pick could not tell)."""
+    from .text import norm_text
+    if "برند" not in name:
+        return cands
+    words = [w for w in norm_text(name.split("برند", 1)[1]).split() if len(w) >= 3]
+    if not words:
+        return cands
+    return [c for c in cands if any(w in norm_text(f"{c.get('title', '')} {c.get('host', '')}") for w in words)]
+
+
 def find(name: str, crop: Image.Image | None, model: str | None = None) -> tuple[Image.Image | None, str, float, int]:
     """(chosen photo, its url, model cost $, searches made). The query is the product name as the site will show it."""
     if not has_key():
         return None, "", 0.0, 0
-    cands = candidates(name)
+    cands = _of_brand(name, candidates(name))
     got = [(c, im) for c in cands for im in [_get(c["url"])] if im is not None]
     if not got:
         return None, "", 0.0, 1
