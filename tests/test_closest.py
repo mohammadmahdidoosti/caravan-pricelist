@@ -162,3 +162,17 @@ def test_row_naming_a_maker_matches_only_that_maker():
     r = match([{"key": "N2", "name": "شيلنگ هيدروليك يك لاسيم سايز 1/4 ال ام سي", "model": "", "price": "220000",
                 "unit": "toman", "brand": ""}], offers, use_model=False)["rows"][0]
     assert not r["offers"] and all(c["offer_id"] == 2 for c in r["cands"])
+
+
+def test_maker_written_in_names_and_length_ranges():
+    from pl.text import words_nums, same_by_name
+    assert "15-7" in words_nums("شیلنگ سایز 1/2 طول 15-7 متر سمپریت")[1]
+    assert "R2-3" not in words_nums("R2-3")[1] and "2-3" not in words_nums("ال ام سی R2-3 LMC")[1]
+    assert not same_by_name("شیلنگ هیدرولیک یک لاسیم سایز 1/2 طول 15-7 متر سمپریت", "شيلنگ هيدروليك يك لاسيم سايز 1/2 طول بالاي 15 متر سمپريت")
+    lmc = [{"offer_id": i, "name": f"شیلنگ هیدرولیک دو لاسیم سایز {s} ال ام سی R2-{s} LMC", "sku": "", "toman": 9e5, "brand": "LMC"}
+           for i, s in enumerate(["1/4", "3/8", "1/2", "3/4"], 1)]
+    chi = [{"offer_id": 10 + i, "name": f"شیلنگ هیدرولیک چهار لاسیم سایز {s} چینی", "sku": "", "toman": 9e5, "brand": "چینی"}
+           for i, s in enumerate(["1", "1/2", "3/8"], 1)]
+    r = match([{"key": "N1", "name": "شيلنگ هيدروليك يك لاسيم سايز 1 ال ام سي 1\"", "model": "", "price": "700000",
+                "unit": "toman", "brand": ""}], lmc + chi, use_model=False)["rows"][0]
+    assert all(c["offer_id"] < 10 for c in r["cands"] + r["offers"])

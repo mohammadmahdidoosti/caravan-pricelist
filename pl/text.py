@@ -67,8 +67,12 @@ def words_nums(text: str) -> tuple[set, set]:
     t = re.sub(r"(سایز|سايز)\s+(\d+\s*/\s*\d+)\s+(\d+)(?![\d./])(?!\s*(?:متر|میل|cm|mm))", lambda m: f"{m.group(1)} {m.group(3)} {m.group(2)}", t)
     # (26 Nov) Hydraparts hoses: «1 1/4» and «1/4» are two sizes; a fraction is one number («1-1/4», «1/4»), not 1 and 4
     fracs = {(f"{m.group(1)}-" if m.group(1) else "") + f"{m.group(2)}/{m.group(3)}" for m in _FRAC.finditer(t)}
-    t = _FRAC.sub(" ", t).replace("/", " / ").replace("*", " * ").replace("×", " × ")
-    nums = set(re.findall(r"\d+(?:\.\d+)?", t)) | fracs
+    t = _FRAC.sub(" ", t)
+    # «طول 15-7 متر» is one length class, not 15 and 7 (a code like R2-3 keeps its letters and is left alone)
+    ranges = {f"{m.group(1)}-{m.group(2)}" for m in re.finditer(r"(?<![\w.\-])(\d+)\s*-\s*(\d+)(?![\w.\-])", t)}
+    t = re.sub(r"(?<![\w.\-])(\d+)\s*-\s*(\d+)(?![\w.\-])", " ", t)
+    t = t.replace("/", " / ").replace("*", " * ").replace("×", " × ")
+    nums = set(re.findall(r"\d+(?:\.\d+)?", t)) | fracs | ranges
     words = {w for w in t.split() if not re.search(r"\d", w) and len(w) > 1 and w not in GENERIC_WORDS}
     return words, nums
 

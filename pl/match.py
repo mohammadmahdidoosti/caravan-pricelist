@@ -124,10 +124,38 @@ def _same_words(x: set, y: set) -> bool:
 
 
 def _name_brands(offers: list[dict]) -> dict:
-    """{offer id: its maker as written in names} for the supplier's makers (product_brand of his offers)."""
-    names = {o.get("_nb") or norm_text(o.get("brand") or "") for o in offers} - {"", "متفرقه", "سایر", "نامشخص", "بدون برند"}
-    names = {b for b in names if len(b.replace(" ", "")) >= 3}
-    return {"all": names}
+    """The seller's makers as they are written in his product names. A maker's brand field may be Latin («LMC») while
+    names say «ال ام سی», so for each brand the phrase (1-3 words) found in most of its names and rarely in the others
+    is taken, besides the brand itself."""
+    from collections import Counter
+    skip = {"", "متفرقه", "سایر", "نامشخص", "بدون برند"}
+    groups: dict[str, list[str]] = {}
+    for o in offers:
+        b = o.get("_nb") if "_nb" in o else norm_text(o.get("brand") or "")
+        if b not in skip:
+            groups.setdefault(b, []).append(o.get("_nn") if "_nn" in o else norm_text(o.get("name", "")))
+    total = Counter()
+    per: dict[str, Counter] = {}
+    for b, names in groups.items():
+        c = Counter()
+        for n in names:
+            w = n.split()
+            c.update({" ".join(w[i:i + k]) for k in (1, 2, 3) for i in range(len(w) - k + 1)})
+        per[b] = c
+        total.update(c)
+    out = set()
+    for b, names in groups.items():
+        if len(b.replace(" ", "")) >= 3:
+            out.add(b)
+        if len(names) < 3:
+            continue
+        # every word of the phrase must belong to this maker («هیدرولیک دو لاسیم» is in every maker's names)
+        good = [g for g, n in per[b].items() if n >= 0.8 * len(names) and len(g.replace(" ", "")) >= 3
+                and not any(ch.isdigit() for ch in g)
+                and all(total[w] - per[b][w] <= 0.1 * per[b][w] for w in g.split())]
+        if good:
+            out.add(max(good, key=lambda g: (per[b][g], len(g))))
+    return {"all": out}
 
 
 def _same_maker(row: dict, offers: list[dict], brands: dict) -> list[dict]:
