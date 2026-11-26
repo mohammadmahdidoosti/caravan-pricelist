@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from functools import lru_cache
 import unicodedata
 
 FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
@@ -61,7 +62,14 @@ _FRAC = re.compile(r"(?<![\d.])(?:(\d+)\s+)?(\d+)\s*/\s*(\d+)(?![\d.])")
 COUNT_WORDS = {"یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "تک", "دوبل"}
 
 
-def words_nums(text: str) -> tuple[set, set]:
+@lru_cache(maxsize=50000)
+def words_nums(text: str) -> tuple[frozenset, frozenset]:
+    """Words and numbers of a name (cached: a big supplier's 3800 names are compared with every row)."""
+    w, n = _words_nums(text)
+    return frozenset(w), frozenset(n)
+
+
+def _words_nums(text: str) -> tuple[set, set]:
     t = norm_text(text)
     # right-to-left typing turns «سایز 1 1/4» into «سایز 1/4 1»
     t = re.sub(r"(سایز|سايز)\s+(\d+\s*/\s*\d+)\s+(\d+)(?![\d./])(?!\s*(?:متر|میل|cm|mm))", lambda m: f"{m.group(1)} {m.group(3)} {m.group(2)}", t)

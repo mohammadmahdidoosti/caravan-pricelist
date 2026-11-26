@@ -167,7 +167,7 @@ def _same_maker(row: dict, offers: list[dict], brands: dict) -> list[dict]:
     mine = {b for b in brands["all"] if b in t}
     if not mine:
         return offers
-    return [o for o in offers if o.get("_nb", "") in mine or any(b in o.get("_nn", "") for b in mine)]
+    return [o for o in offers if o.get("_mk", set()) & mine]
 
 
 def _closest(row: dict, same: list[dict]) -> list[dict]:
@@ -326,6 +326,8 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         by_id[str(o.get("offer_id"))] = o
     out, todo, usd = [], [], 0.0
     brands = _name_brands(offers)
+    for o in offers:                                     # which of the makers each product carries, once
+        o["_mk"] = {m for m in brands["all"] if m == o["_nb"] or m in o["_nn"]}
     all_offers = offers
     for r in rows:
         offers = _same_maker(r, all_offers, brands)
@@ -388,7 +390,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         res["cands"] = [] if res["status"] == "green" else res["cands"][:5]
     counts = {s: sum(1 for r in out if r["status"] == s) for s in ("green", "yellow", "new")}
     for o in offers:
-        for k in ("_wn", "_hay", "_nb", "_nn"):
+        for k in ("_wn", "_hay", "_nb", "_nn", "_mk"):
             o.pop(k, None)
     return {"rows": out, "counts": counts, "usd": round(usd, 4)}
 
