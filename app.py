@@ -5,7 +5,7 @@ POST /jobs/pull   JSON {"meta_url": "...", "files": [{"url": "...", "name": "lis
 POST /jobs        files[] + meta (JSON): {supplier_id, supplier_name, unit_hint, offers: [...], aliases: {key: offer_id},
                   callback_url}  ->  {"id": "<job>"}
 GET  /jobs/<id>   {"status": queued|reading|matching|done|failed, "progress": .., "result": {...}}
-GET  /jobs/<id>/photo?label=<file label of a row>&name=<product name>[&q=<full name for a web search>]
+GET  /jobs/<id>/photo?label=<file label of a row>&name=<product name>[&q=<full name for a web search>][&web=0]
                   {"webp": base64, "box": [x0,y0,x1,y1], "usd": ..}: the product's picture cut out of its catalog page
 GET  /health      {"ok": true, "model": .., "key": true|false}
 
@@ -179,7 +179,7 @@ def job_index(jid: str, file: str = "", x_pl_token: str | None = Header(None)):
 
 
 @app.get("/jobs/{jid}/photo")
-def job_photo(jid: str, label: str, name: str, q: str = "", x_pl_token: str | None = Header(None)):
+def job_photo(jid: str, label: str, name: str, q: str = "", web: int = 1, x_pl_token: str | None = Header(None)):
     """The picture of one row's product, cut from the page the row was read on (label: 'list.pdf ص3' or a file)."""
     import base64
     from pl.photo import catalog_photo
@@ -204,7 +204,7 @@ def job_photo(jid: str, label: str, name: str, q: str = "", x_pl_token: str | No
         W, H = img.size
         crop = img.crop((int(box[0] * W), int(box[1] * H), int(box[2] * W), int(box[3] * H)))
         small = max(crop.size) < SMALL_PHOTO
-    if small:
+    if small and web:                                    # web=0: the catalog is the only source (the user said so)
         from pl import websearch
         from pl.photo import square
         try:
