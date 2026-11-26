@@ -71,3 +71,11 @@ def test_dropped_thousands_group_is_noted():
 def test_escalation_off(monkeypatch):
     monkeypatch.setenv("PL_ESCALATE", "0")
     assert len(read.ladder()) == 1
+
+
+def test_strip_overlap_rows_kept_once_but_variants_stay():
+    a = {"rows": [{"model": "DZ-SIF95 (R)", "price": "14750000"}, {"model": "DZ-SIF95 (W)", "price": "14750000"},
+                  {"model": "DZ-12 Zone (ABS)", "price": "267000000"}]}
+    b = {"rows": [{"model": "DZ-12 Zone", "price": "267000000"}, {"model": "DZ-14 Zone", "price": "274000000"}]}
+    rows = read._page_rows([a, b], "p")
+    assert [r["model"] for r in rows] == ["DZ-SIF95 (R)", "DZ-SIF95 (W)", "DZ-12 Zone (ABS)", "DZ-14 Zone"]

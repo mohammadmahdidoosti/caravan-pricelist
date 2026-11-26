@@ -5,7 +5,7 @@ POST /jobs/pull   JSON {"meta_url": "...", "files": [{"url": "...", "name": "lis
 POST /jobs        files[] + meta (JSON): {supplier_id, supplier_name, unit_hint, offers: [...], aliases: {key: offer_id},
                   callback_url}  ->  {"id": "<job>"}
 GET  /jobs/<id>   {"status": queued|reading|matching|done|failed, "progress": .., "result": {...}}
-GET  /jobs/<id>/photo?label=<file label of a row>&name=<product name>
+GET  /jobs/<id>/photo?label=<file label of a row>&name=<product name>[&q=<full name for a web search>]
                   {"webp": base64, "box": [x0,y0,x1,y1], "usd": ..}: the product's picture cut out of its catalog page
 GET  /health      {"ok": true, "model": .., "key": true|false}
 
@@ -100,6 +100,7 @@ def _startup() -> None:
 
 
 FAR_PCT = int(os.environ.get("PL_FAR_PCT", "60"))
+SMALL_PHOTO = 320           # a catalog picture smaller than this (px, long side) is looked up on the web
 
 
 def _run(job: Path, meta: dict) -> None:
@@ -161,7 +162,7 @@ def _run(job: Path, meta: dict) -> None:
 
 
 @app.get("/jobs/{jid}/photo")
-def job_photo(jid: str, label: str, name: str, x_pl_token: str | None = Header(None)):
+def job_photo(jid: str, label: str, name: str, q: str = "", x_pl_token: str | None = Header(None)):
     """The picture of one row's product, cut from the page the row was read on (label: 'list.pdf ص3' or a file)."""
     import base64
     from pl.photo import catalog_photo
@@ -178,9 +179,29 @@ def job_photo(jid: str, label: str, name: str, x_pl_token: str | None = Header(N
     except Exception as e:                               # noqa: BLE001
         log.warning("photo %s %s: %s", jid, label, e)
         raise HTTPException(status_code=500, detail="photo failed")
+    # (26 Nov) the catalog's picture is small (a messenger poster): a clean photo of the same product from the web
+    small, crop = True, None
+    if box:
+        from pl.photo import page_image
+        img = page_image(path, page, 300)
+        W, H = img.size
+        crop = img.crop((int(box[0] * W), int(box[1] * H), int(box[2] * W), int(box[3] * H)))
+        small = max(crop.size) < SMALL_PHOTO
+    if small:
+        from pl import websearch
+        from pl.photo import square
+        try:
+            web, url, u2, n = websearch.find((q or name)[:200], crop)
+        except Exception as e:                           # noqa: BLE001 - the catalog cut is still there
+            log.warning("web photo %s: %s", name[:60], e)
+            web, url, u2, n = None, "", 0.0, 0
+        usd += u2
+        if web is not None:
+            return {"webp": base64.b64encode(square(web)).decode(), "box": box, "usd": round(usd, 4),
+                    "source": url, "searches": n}
     if not pic:
         return {"webp": None, "box": None, "usd": usd}
-    return {"webp": base64.b64encode(pic).decode(), "box": box, "usd": usd}
+    return {"webp": base64.b64encode(pic).decode(), "box": box, "usd": usd, "source": "catalog", "small": small}
 
 
 @app.get("/health")

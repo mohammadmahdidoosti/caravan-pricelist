@@ -148,6 +148,24 @@ def make(img: Image.Image, box: list[float], size: int = 1000) -> Image.Image:
     return out
 
 
+def square(im: Image.Image, size: int = 1000) -> bytes:
+    """A web photo made like the site's own: centred on a white square, the Caravan logo bottom-right, as webp."""
+    im = im.convert("RGB")
+    side = int(max(im.size) / 0.9)
+    out = Image.new("RGB", (side, side), (255, 255, 255))
+    out.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
+    out = out.resize((size, size), Image.LANCZOS)
+    if LOGO.exists():
+        logo = Image.open(LOGO).convert("RGBA")
+        lw = int(size * 0.09)
+        logo = logo.resize((lw, max(1, int(logo.height * lw / logo.width))), Image.LANCZOS)
+        m = int(size * 0.025)
+        out.paste(logo, (size - lw - m, size - logo.height - m), logo)
+    buf = io.BytesIO()
+    out.save(buf, "WEBP", quality=88)
+    return buf.getvalue()
+
+
 def _iou(a: list[float], b: list[float]) -> float:
     ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
     iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))

@@ -57,6 +57,48 @@ def _by_brand(row: dict, items: list[dict]) -> list[dict]:
     return [o for o in items if _brand_hits(row, o) == best]
 
 
+def _other_brand(row: dict, offer: dict) -> str:
+    """(26 Nov) The site product's brand when it is clearly another maker than the list's ('' when not sure).
+    A Dezli list matched three Dezli rows by name to Hirman products and marked them green."""
+    bw = _brand_words(row)
+    ob = str(offer.get("brand") or "").strip()
+    if not bw or not ob:
+        return ""
+    if bw & words_nums(ob)[0] or _brand_hits(row, offer):
+        return ""                                    # same brand, or the list's brand is in the product's name
+    return ob
+
+
+def _brand_guard(out: list[dict], by_id: dict) -> None:
+    """A suggestion of another brand is never sure: green -> yellow, and the suggestion becomes a choice. A green
+    found by name (not by the model code) for a row that HAS a model code the site's product does not carry is also
+    only a guess."""
+    for res in out:
+        if not res["offers"] or res.get("how") == "memory":   # a choice a person made before stands
+            continue
+        o = by_id.get(str(res["offers"][0].get("offer_id")))
+        if not o:
+            continue
+        note = ""
+        other = _other_brand(res, o)
+        if other:
+            note = f"برند کالای پیشنهادی ({other}) با برند لیست فرق دارد؛ بررسی کنید"
+        elif res["status"] == "green" and res.get("how") == "name":
+            k = res.get("key", "")
+            if k and not k.startswith("N") and not weak_key(k) and not contains_model(o["_hay"], k):
+                note = "کد مدل لیست در نام کالای سایت نیست؛ بررسی کنید"
+        if not note:
+            continue
+        res["note"] = "؛ ".join(x for x in (res.get("note") or "", note) if x)
+        if other:
+            res["cands"] = res["offers"] + [c for c in res["cands"] if c.get("offer_id") != res["offers"][0].get("offer_id")]
+            res["offers"] = []
+            res["status"] = "yellow" if res["cands"] else "new"
+        else:
+            res["status"] = "yellow"
+        res["how"] = (res.get("how") or "") + "_guard"
+
+
 def _head(name: str) -> str:
     """The kind of product: the first one or two words before any number ('زانو', 'سه راه', 'تبدیل')."""
     out = []
@@ -218,6 +260,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
                 elif chosen:
                     res.update(status="yellow", how="model_pick_many", cands=[_brief(o) for o in chosen])
 
+    _brand_guard(out, by_id)
     _infer_units(out)
     for res in out:
         o = res["offers"][0] if res["offers"] else None

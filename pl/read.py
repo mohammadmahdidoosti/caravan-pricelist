@@ -454,9 +454,15 @@ def ladder_report(pages: dict) -> dict:
 def _ask_parts(parts: list[bytes], system: str, text: str, model: str, max_tokens: int) -> tuple[list[dict], float, int, bool]:
     """One reading of a page (all its strips): the rows of every strip, cost, calls, whether every strip answered."""
     out, usd, ok = [], 0.0, True
-    for p in parts:
+    for i, p in enumerate(parts, 1):
+        t = text
+        if len(parts) > 1:
+            # (26 Nov) a table cut by a strip edge was read twice, once with its first digits lost
+            t += (f" This picture is part {i} of {len(parts)} of one tall page, cut in horizontal strips that overlap a"
+                  " little. Read only the rows printed whole in this part: leave out a row cut by the top or bottom"
+                  " edge (the next or previous part has it whole), and never return a table's title or header as a row.")
         j, c = llm.ask([{"role": "system", "content": system},
-                        {"role": "user", "content": [{"type": "text", "text": text}, llm.image_part(p, "image/jpeg")]}],
+                        {"role": "user", "content": [{"type": "text", "text": t}, llm.image_part(p, "image/jpeg")]}],
                        max_tokens=max_tokens, model_id=None if model == llm.model() else model)
         usd += c
         if j is None:
@@ -467,14 +473,20 @@ def _ask_parts(parts: list[bytes], system: str, text: str, model: str, max_token
 
 def _page_rows(answers: list, label: str) -> list[dict]:
     """Rows of all strips; a row read twice where two strips overlap is kept once."""
-    rows, seen = [], set()
+    rows, seen, before = [], set(), set()
     for j in answers:
+        here = set()
         for r in _rows_of(j, label):
             k = row_key(r.get("model", ""), r.get("name", ""))
-            if k and k in seen:
+            # the same row from two overlapping strips, its code read once with and once without «(ABS)»; rows of
+            # ONE strip with the same price are real variants (DZ-SIF95 (R) and (W)) and all stay
+            k2 = (model_key(re.sub(r"\(.*?\)", "", r.get("model", ""))), _digits(r.get("price")))
+            if (k and k in seen) or (k2[0] and k2[1] and k2 in before):
                 continue
             seen.add(k)
+            here.add(k2)
             rows.append(r)
+        before |= here
     return rows
 
 
