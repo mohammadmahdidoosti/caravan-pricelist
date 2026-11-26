@@ -210,3 +210,18 @@ def test_glued_inch_size():
     from pl.text import words_nums
     assert words_nums("شیلنگ نخدار روغن سمپریت سایز 11/4")[1] == words_nums("شیلنگ نخدار روغن سمپریت سایز 1 1/4")[1]
     assert "1/4" in words_nums("شیلنگ سایز 1/4")[1]
+
+
+def test_pdf_text_line_settles_price(tmp_path):
+    from reportlab.pdfgen import canvas
+    from pl.read import _check_with_text
+    f = tmp_path / "list.pdf"
+    c = canvas.Canvas(str(f))
+    c.drawString(40, 700, "2137719  10  12/108  19,100,000  ETIMAT 10 C 32A 220V DC 6KA 1P")
+    c.drawString(40, 680, "2137720  11  12/108  26,700,000  ETIMAT 10 C 40A 220V DC 6KA 1P")
+    c.save()
+    rows = [{"model": "2137719", "price": "19,200,000", "file": "list.pdf ص1", "check": "قیمت در خواندن دوم 19100000 خوانده شد؛ بررسی کنید"},
+            {"model": "2137720", "price": "26,700,000", "file": "list.pdf ص1", "check": "قیمت در خواندن دوم 19100000 خوانده شد؛ بررسی کنید"}]
+    _check_with_text([f], rows, "rial")
+    assert rows[0]["price"] == "19,100,000" and "PDF" in rows[0]["check"]
+    assert rows[1]["price"] == "26,700,000" and "check" not in rows[1]
