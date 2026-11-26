@@ -97,7 +97,7 @@ TABLE_EXT = (".xlsx", ".xlsm", ".xls", ".csv")
 
 # ------------------------------------------------------------------ pictures
 
-def images_of(f: Path) -> list[tuple[str, bytes, str]]:
+def images_of(f: Path, skip: set | frozenset = frozenset()) -> list[tuple[str, bytes, str]]:
     """(label, picture bytes, mime) of one file: a picture as it is (made smaller when huge), a PDF page by page."""
     low = f.name.lower()
     if low.endswith(PICTURE_EXT):
@@ -107,6 +107,8 @@ def images_of(f: Path) -> list[tuple[str, bytes, str]]:
         out = []
         with pdfplumber.open(str(f)) as pdf:
             for i, page in enumerate(pdf.pages, 1):
+                if i in skip:                            # read from its text already
+                    continue
                 buf = io.BytesIO()
                 page.to_image(resolution=200).original.convert("RGB").save(buf, "JPEG", quality=85)
                 out.append((f"{f.name} ص{i}", buf.getvalue(), "image/jpeg"))
@@ -390,6 +392,70 @@ def headless_rows(vals: list[list]) -> list[dict]:
     return out
 
 
+_FA = re.compile(r"[\u0600-\u06FF]")
+
+
+def _fa_order(line: str) -> str:
+    """pdfium gives an RTL run of words in visual order («مینیاتوری کلید»): each run of Persian words is turned back."""
+    out, run = [], []
+    for w in line.split():
+        if _FA.search(w):
+            run.append(w)
+            continue
+        out += run[::-1] + [w]
+        run = []
+    return " ".join(out + run[::-1])
+
+
+def pdf_text_pages(f: Path) -> dict[int, str]:
+    """(26 Nov) A PDF that carries its text (Fuse Central's ETI catalog, 6 MB, 30 pages) is read from the text: free of
+    misread digits and far cheaper than a picture. Each printed line is taken as a band across the page, so a row's
+    code, name and price stay together. Pages with little text or no prices are left to the picture reading."""
+    out: dict[int, str] = {}
+    try:
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(str(f))
+    except Exception as e:                               # noqa: BLE001
+        log.warning("pdf text %s: %s", f.name, e)
+        return out
+    t0 = time.monotonic()
+    for i in range(len(pdf)):
+        if time.monotonic() - t0 > 120:
+            break
+        try:
+            page = pdf[i]
+            tp = page.get_textpage()
+            W = page.get_size()[0]
+            n = tp.count_chars()
+            if n < 150:
+                continue
+            boxes = []
+            for j in range(n):
+                b = tp.get_charbox(j)
+                if b[3] - b[1] > 0.5:
+                    boxes.append(((b[1] + b[3]) / 2, b[3] - b[1], b[1], b[3]))
+            boxes.sort(key=lambda x: -x[0])              # top of the page first
+            bands, cur = [], None
+            for cy, h, y0, y1 in boxes:
+                if cur and abs(cur[0] - cy) <= 0.5 * max(h, cur[1]):
+                    cur[2], cur[3] = min(cur[2], y0), max(cur[3], y1)
+                else:
+                    cur = [cy, h, y0, y1]
+                    bands.append(cur)
+            lines = []
+            for _cy, _h, y0, y1 in bands:
+                t = re.sub(r"\s+", " ", str(tp.get_text_bounded(0, y0 - 0.5, W, y1 + 0.5) or "")).strip()
+                if t:
+                    lines.append(_fa_order(t))
+            text = "\n".join(dict.fromkeys(lines))
+            if len(re.findall(r"\d{1,3}(?:,\d{3})+", text.translate(FA_DIGITS))) >= 3:
+                out[i + 1] = text
+        except Exception as e:                           # noqa: BLE001 - that page goes to the picture reading
+            log.warning("pdf text %s p%d: %s", f.name, i + 1, e)
+    pdf.close()
+    return out
+
+
 def sheet_text(f: Path, max_rows: int = 600) -> str:
     vals, _ = _grid(f)
     lines = []
@@ -469,8 +535,17 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
                     if bad:
                         failed.append(f"{f.name}: {bad} تکه خوانده نشد")
                 continue
-            got = images_of(f)
-            if not got:
+            text_pages = pdf_text_pages(f) if low.endswith(".pdf") else {}
+            chunks = [(f"{f.name} ص{pno}", text[i:i + 8000]) for pno, text in text_pages.items() for i in range(0, len(text), 8000)]
+            with ThreadPoolExecutor(4) as ex:
+                for (label, _t), (got, c, n, bad) in zip(chunks, ex.map(lambda x: _read_text(x[1], x[0]), chunks)):
+                    spent["text"] = spent.get("text", 0.0) + c
+                    calls += n
+                    rows += got
+                    if bad:
+                        failed.append(f"{label}: {bad} تکه خوانده نشد")
+            got = images_of(f, set(text_pages))
+            if not got and not text_pages:
                 failed.append(f"{f.name}: نوع فایل پشتیبانی نمی‌شود")
             pics += [(f, *x) for x in got]
         except Exception as e:                           # noqa: BLE001 - one file never stops the others

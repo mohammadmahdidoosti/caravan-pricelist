@@ -235,3 +235,20 @@ def test_brands_settle_to_the_maker():
            [{"brand": "LS", "name": "کنتاکتور MC-9"}]
     out = settle_brands(rows)
     assert all(r["brand"] == "ETI" for r in out[:22]) and out[-1]["brand"] == "LS"
+
+
+def test_text_pdf_pages_found(tmp_path):
+    from reportlab.pdfgen import canvas
+    from pl.read import pdf_text_pages, _fa_order
+    f = tmp_path / "cat.pdf"
+    c = canvas.Canvas(str(f))
+    y = 780
+    for k in range(12):
+        c.drawString(40, y, f"21217{10 + k}  {k + 1}  12/108  {10 + k},500,000  ETIMAT 10 B {k + 2}A 230/400V AC 10KA 1P")
+        y -= 18
+    c.showPage()
+    c.drawString(40, 700, "picture only page")
+    c.save()
+    pages = pdf_text_pages(f)
+    assert list(pages) == [1] and len(pages[1].splitlines()) == 12 and "2121710" in pages[1].splitlines()[0]
+    assert _fa_order("ETIMAT مینیاتوری کلید 2137714") == "ETIMAT کلید مینیاتوری 2137714"
