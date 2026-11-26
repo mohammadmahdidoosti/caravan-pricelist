@@ -161,6 +161,11 @@ def _name_brands(offers: list[dict]) -> dict:
     for b, names in groups.items():
         if len(b.replace(" ", "")) >= 3:
             out.add(b)
+        # «ال ام سی lmc»: the Persian and the Latin half are each the maker (a list writes only one of them)
+        for half in (re.sub(r"[a-z0-9\-]+", " ", b).split(), re.findall(r"[a-z][a-z0-9\-]*", b)):
+            h = " ".join(half)
+            if h != b and len(h.replace(" ", "")) >= 3 and h not in skip:
+                out.add(h)
         if len(names) < 3:
             continue
         # every word of the phrase must belong to this maker («هیدرولیک دو لاسیم» is in every maker's names)
@@ -188,6 +193,8 @@ def _same_maker(row: dict, offers: list[dict], brands: dict) -> list[dict]:
         return offers
     t = norm_text(f"{row.get('name', '')} {row.get('brand', '')}")
     mine = {b for b in brands["all"] if b in t}
+    # «ال ام سی» holds «ام سی» (another maker, MC): only the longest maker written in the row counts
+    mine = {b for b in mine if not any(b != m and b in m for m in mine)}
     if not mine:
         return offers
     return [o for o in offers if o.get("_mk", set()) & mine]

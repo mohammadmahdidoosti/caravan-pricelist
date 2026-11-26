@@ -185,3 +185,16 @@ def test_makers_learnt_without_brand_field():
     fit = [{"name": f"اتصال پنوماتیک سایز {s}", "brand": ""} for s in ["1", "3/4", "1/2", "3/8", "1/4"]]
     got = _name_brands(lmc + chi + fit)["all"]
     assert "lmc" in got and "ال ام سی" in got and "چینی" in got and "سایز" not in got and "پنوماتیک" not in got
+
+
+def test_maker_with_persian_and_latin_name():
+    from pl.match import match
+    lmc = [{"offer_id": i, "name": f"شیلنگ هیدرولیک دو لاسیم سایز {s} ال ام سی R2-{s} LMC", "sku": "", "toman": 9e5, "brand": "ال ام سی LMC"}
+           for i, s in enumerate(["1/4", "3/8", "1/2"], 1)]
+    mc = [{"offer_id": 10 + i, "name": f"شیلنگ هیدرولیک یک لاسیم سایز {s} ام سی", "sku": "", "toman": 9e5, "brand": "ام سی MC"}
+          for i, s in enumerate(["1", "1/2", "3/8"], 1)]
+    chi = [{"offer_id": 20 + i, "name": f"شیلنگ هیدرولیک یک لاسیم سایز {s} طول 15-7 متر سمپریت", "sku": "", "toman": 9e5, "brand": ""}
+           for i, s in enumerate(["1", "1/2", "3/8"], 1)]
+    r = match([{"key": "N1", "name": "شيلنگ هيدروليك يك لاسيم سايز 1/2 ال ام سي 1/2\"", "model": "", "price": "700000",
+                "unit": "toman", "brand": ""}], lmc + mc + chi, use_model=False)["rows"][0]
+    assert all(c["offer_id"] < 10 for c in r["cands"] + r["offers"])
