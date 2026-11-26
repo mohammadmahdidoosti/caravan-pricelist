@@ -17,7 +17,7 @@ def test_other_brand_is_never_green():
     m = match([_row("DZ-HD24F", "دتکتور حرارتی ثابت 24 ولت")], _offers(), use_model=False)
     r = m["rows"][0]
     assert r["status"] != "green" and not r["offers"]
-    assert "برند" in r["note"]
+    assert "برند" in (r.get("note") or "") or r["status"] == "new"   # (26 Nov) another maker is not even a candidate
 
 
 def test_same_brand_by_model_stays_green():

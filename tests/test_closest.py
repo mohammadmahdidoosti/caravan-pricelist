@@ -151,3 +151,14 @@ def test_reversed_size_and_one_quarter_row():
     p = "شیلنگ هیدرولیک دو لاسیم سایز 1/4 1 ال ام سی R2-1 1/4 LMC"
     assert not same_by_name(p, "شيلنگ هيدروليك دو لاسيم سايز 1/4 ال ام سي 1/4\"")
     assert same_by_name(p, "شيلنگ هيدروليك دو لاسيم سايز 1/4 1 ال ام سي 1 1/4\"")
+
+
+def test_row_naming_a_maker_matches_only_that_maker():
+    offers = [{"offer_id": 1, "name": "شیلنگ هیدرولیک دو لاسیم سایز 1/4 چینی", "sku": "", "toman": 300000, "brand": "چینی"},
+              {"offer_id": 2, "name": "شیلنگ هیدرولیک دو لاسیم سایز 1/4 ال ام سی LMC", "sku": "", "toman": 500000, "brand": "ال ام سی"}]
+    r = match([{"key": "N1", "name": "شيلنگ هيدروليك دو لاسيم سايز 1/4 ال ام سي 1/4\"", "model": "", "price": "272000",
+                "unit": "toman", "brand": ""}], offers, use_model=False)["rows"][0]
+    assert r["status"] == "green" and r["offers"][0]["offer_id"] == 2
+    r = match([{"key": "N2", "name": "شيلنگ هيدروليك يك لاسيم سايز 1/4 ال ام سي", "model": "", "price": "220000",
+                "unit": "toman", "brand": ""}], offers, use_model=False)["rows"][0]
+    assert not r["offers"] and all(c["offer_id"] == 2 for c in r["cands"])

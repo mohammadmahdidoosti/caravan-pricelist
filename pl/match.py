@@ -123,6 +123,25 @@ def _same_words(x: set, y: set) -> bool:
     return all(any(_near(a, b) for b in y) for a in x) and all(any(_near(b, a) for a in x) for b in y)
 
 
+def _name_brands(offers: list[dict]) -> dict:
+    """{offer id: its maker as written in names} for the supplier's makers (product_brand of his offers)."""
+    names = {o.get("_nb") or norm_text(o.get("brand") or "") for o in offers} - {"", "متفرقه", "سایر", "نامشخص", "بدون برند"}
+    names = {b for b in names if len(b.replace(" ", "")) >= 3}
+    return {"all": names}
+
+
+def _same_maker(row: dict, offers: list[dict], brands: dict) -> list[dict]:
+    """(26 Nov) Hydraparts sells LMC, Semperit, Chinese and «متفرقه» hoses of every size; the brand is in the row's
+    name, not in a brand column. A row naming one of the seller's makers is matched only to that maker's products."""
+    if not brands["all"]:
+        return offers
+    t = norm_text(f"{row.get('name', '')} {row.get('brand', '')}")
+    mine = {b for b in brands["all"] if b in t}
+    if not mine:
+        return offers
+    return [o for o in offers if o.get("_nb", "") in mine or any(b in o.get("_nn", "") for b in mine)]
+
+
 def _closest(row: dict, same: list[dict]) -> list[dict]:
     """(26 Nov) Several products pass the name test (silver / gold, brushed / mirror, one / two metres of the same
     panel). The one whose words are the row's words (a one-letter typo allowed), and alone in that, is the product."""
@@ -275,9 +294,13 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
     for o in offers:
         o["_wn"] = words_nums(o.get("name", ""))
         o["_hay"] = f"{o.get('name', '')} {o.get('sku', '')}"
+        o["_nb"], o["_nn"] = norm_text(o.get("brand") or ""), norm_text(o.get("name", ""))
         by_id[str(o.get("offer_id"))] = o
     out, todo, usd = [], [], 0.0
+    brands = _name_brands(offers)
+    all_offers = offers
     for r in rows:
+        offers = _same_maker(r, all_offers, brands)
         res = {**r, "status": "new", "how": "", "offers": [], "cands": []}
         k = r["key"]
         if k in aliases and str(aliases[k]) in by_id:
@@ -322,6 +345,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
                 elif chosen:
                     res.update(status="yellow", how="model_pick_many", cands=[_brief(o) for o in chosen])
 
+    offers = all_offers
     _brand_guard(out, by_id)
     _infer_units(out)
     for res in out:
@@ -336,8 +360,8 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
         res["cands"] = [] if res["status"] == "green" else res["cands"][:5]
     counts = {s: sum(1 for r in out if r["status"] == s) for s in ("green", "yellow", "new")}
     for o in offers:
-        o.pop("_wn", None)
-        o.pop("_hay", None)
+        for k in ("_wn", "_hay", "_nb", "_nn"):
+            o.pop(k, None)
     return {"rows": out, "counts": counts, "usd": round(usd, 4)}
 
 
