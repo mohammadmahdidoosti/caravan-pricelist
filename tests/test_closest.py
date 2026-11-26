@@ -101,3 +101,31 @@ def test_catalog_index_find():
     idx = {"pages": {"39": ["COP panel", "ECONOMY"], "74": ["Control board"], "12": ["display/monitor", "COP panel"]}}
     assert find(idx, ["economy"]) == [39]
     assert find(idx, ["panel", "display"])[0] == 12
+
+
+def test_failed_text_chunk_is_read_in_halves(monkeypatch):
+    from pl import read, llm
+    calls = []
+    def fake(msgs, max_tokens=8000, **k):
+        t = msgs[1]["content"]
+        calls.append(len(t))
+        if len(t) > 3000:
+            return None, 0.001
+        return {"rows": [{"name": "x", "price": "1000"}]}, 0.001
+    monkeypatch.setattr(llm, "ask", fake)
+    rows, usd, n, bad = read._read_text(("سطر قیمت 1000\\n" * 300)[:4000], "a.xls")
+    assert bad == 0 and len(rows) == 2 and n == 3
+
+
+def test_headless_sheet():
+    from pl.read import headless_rows
+    vals = [[None, None, None, None, 1405], [None] * 5]
+    sizes = ['1/8”', '3/16”', '1/4”', '5/16”', '3/8”', '1/2’’']
+    for i, sz in enumerate(sizes):
+        vals.append(["شيلنگ هيدروليك يك لاسيم سايز", 2140101100 + i * 100, "R1" if i == 0 else None, sz, 200000 + i * 36000.00000000003])
+    vals.append(["شيلنگ هيدروليك دو لاسيم سايز", 2140201100, "R2", '1/4”', 410000])
+    rows = headless_rows(vals)
+    assert len(rows) == 7
+    assert rows[0]["model"] == "2140101100" and rows[0]["price"] == "200000"
+    assert "R1" in rows[2]["name"] and '1/4"' in rows[2]["name"]
+    assert "R2" in rows[-1]["name"]

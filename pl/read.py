@@ -278,8 +278,12 @@ def table_rows(f: Path) -> list[dict]:
     reds = [list(r) + [False] * (width - len(r)) for r in reds]
     hi = next((i for i, r in enumerate(vals[:15]) if sum(1 for c in r if isinstance(c, str) and c.strip()) >= 2), None)
     if hi is None:
-        return []
+        return headless_rows(vals)
     head = [str(c or "").strip().lower() for c in vals[hi]]
+    if not any(_is(h, "قیمت", "price", "مبلغ", "فی") for h in head):
+        got = headless_rows(vals)                         # (26 Nov) Hydraparts: no header row at all
+        if got:
+            return got
     prices = [i for i, h in enumerate(head) if _is(h, "قیمت", "price", "مبلغ", "فی")]
     names = [i for i, h in enumerate(head) if _is(h, "نام", "شرح", "عنوان", "name", "product", "کالا", "محصول")
              and i not in prices]
@@ -324,6 +328,68 @@ def table_rows(f: Path) -> list[dict]:
     return out
 
 
+def _num(c) -> float | None:
+    if isinstance(c, (int, float)) and not isinstance(c, bool):
+        return float(c)
+    t = re.sub(r"[,٬\s]", "", str(c or "").translate(FA_DIGITS))
+    return float(t) if re.fullmatch(r"\d+(\.\d+)?", t) else None
+
+
+def headless_rows(vals: list[list]) -> list[dict]:
+    """(26 Nov) A sheet with no header row (Hydraparts: name | 10-digit code | type | size | price). Columns are told
+    by what they hold: the one with most Persian words is the name, a column of same-length long numbers is a code,
+    the numeric column of varied big numbers on the far side is the price, short cells with digits are a size, and
+    a column of short words given on a group's first row (R1, 2SN) goes down its group. Unclear: []."""
+    rows = [r for r in vals if sum(1 for c in r if c is not None and str(c).strip() not in ("", "None")) >= 3]
+    if len(rows) < 5:
+        return []
+    width = max(len(r) for r in rows)
+    rows = [list(r) + [None] * (width - len(r)) for r in rows]
+    def col(j):
+        return [r[j] for r in rows if r[j] is not None and str(r[j]).strip() not in ("", "None")]
+    fa = lambda c: len(re.findall(r"[؀-ۿ]", str(c)))
+    name = max(range(width), key=lambda j: sum(fa(c) for c in col(j)))
+    if sum(fa(c) for c in col(name)) < len(rows) * 3:
+        return []
+    code, price, size, kind = None, None, None, None
+    for j in range(width):
+        if j == name:
+            continue
+        cs = col(j)
+        if len(cs) < len(rows) * 0.2:
+            continue
+        nums = [_num(c) for c in cs]
+        if all(n is not None for n in nums):
+            lens = {len(str(int(n))) for n in nums}
+            if len(lens) == 1 and min(lens) >= 8 and len(cs) >= len(rows) * 0.8:
+                code = j
+            elif max(nums) >= 1000 and len(set(nums)) > len(nums) * 0.3:
+                price = j                                 # the last such column wins: prices sit at the far side
+        elif all(len(str(c)) <= 12 and re.search(r"\d\s*/\s*\d|[\"”’″]|اینچ|میل|mm", str(c).translate(FA_DIGITS))
+                 for c in cs):
+            size = j
+        elif all(len(str(c)) <= 8 for c in cs) and len(cs) < len(rows) * 0.8:
+            kind = j
+    if price is None:
+        return []
+    out, last_kind = [], ""
+    for r in rows:
+        nm = str(r[name] or "").strip()
+        if r[name] is None or not nm or fa(nm) == 0:
+            continue
+        if kind is not None and r[kind] is not None and str(r[kind]).strip() not in ("", "None"):
+            last_kind = str(r[kind]).strip()
+        p = _num(r[price])
+        if p is None:
+            continue
+        parts = [nm] + ([last_kind] if kind is not None and last_kind else []) + (
+            [str(r[size]).strip().replace("’’", '"').replace("”", '"')] if size is not None and r[size] is not None else [])
+        out.append({"brand": "", "model": str(int(_num(r[code]))) if code is not None and _num(r[code]) else "",
+                    "name": " ".join(parts), "price": str(int(round(p))), "unit": "unknown", "stock": "", "vat": "",
+                    "list_date": ""})
+    return out
+
+
 def sheet_text(f: Path, max_rows: int = 600) -> str:
     vals, _ = _grid(f)
     lines = []
@@ -365,6 +431,21 @@ def _rows_of(j: dict | None, label: str) -> list[dict]:
     return out
 
 
+def _read_text(chunk: str, label: str, depth: int = 0) -> tuple[list[dict], float, int, int]:
+    """(rows, $, calls, chunks lost) of a sheet read as text. (26 Nov) Hydraparts: an 8000-character chunk of a long
+    sheet came back unreadable (the answer was cut at its token limit) and its rows were lost; such a chunk is read
+    again in two halves, cut at a line break."""
+    j, c = llm.ask([{"role": "system", "content": VISION_SYSTEM},
+                    {"role": "user", "content": TEXT_USER + "\n\n" + chunk}], max_tokens=8000)
+    if j is not None or depth >= 2 or len(chunk) < 800:
+        return _rows_of(j, label), c, 1, int(j is None)
+    mid = chunk.rfind("\n", 0, len(chunk) // 2 + 200)
+    mid = mid if mid > len(chunk) // 4 else len(chunk) // 2
+    a = _read_text(chunk[:mid], label, depth + 1)
+    b = _read_text(chunk[mid:], label, depth + 1)
+    return a[0] + b[0], c + a[1] + b[1], 1 + a[2] + b[2], a[3] + b[3]
+
+
 def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dict:
     """Every file -> merged rows. {'rows': [...], 'usd': .., 'calls': .., 'failed': [...], 'pages': ..}"""
     rows, usd, calls, failed, pics = [], 0.0, 0, [], []
@@ -382,12 +463,11 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
                     failed.append(f"{f.name}: فایل خالی است")
                     continue
                 for i in range(0, len(text), 8000):
-                    j, c = llm.ask([{"role": "system", "content": VISION_SYSTEM},
-                                    {"role": "user", "content": TEXT_USER + "\n\n" + text[i:i + 8000]}], max_tokens=8000)
-                    usd, calls = usd + c, calls + 1
-                    if j is None:
-                        failed.append(f"{f.name}: خوانده نشد")
-                    rows += _rows_of(j, f.name)
+                    got, c, n, bad = _read_text(text[i:i + 8000], f.name)
+                    usd, calls = usd + c, calls + n
+                    rows += got
+                    if bad:
+                        failed.append(f"{f.name}: {bad} تکه خوانده نشد")
                 continue
             got = images_of(f)
             if not got:
