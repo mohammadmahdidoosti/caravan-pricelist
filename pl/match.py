@@ -109,12 +109,50 @@ def _brand_guard(out: list[dict], by_id: dict) -> None:
         res["how"] = (res.get("how") or "") + "_guard"
 
 
+def _near(a: str, b: str) -> bool:
+    """Same word, or a one-letter typo of a long word («میرورر» / «میرور»)."""
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 4 or abs(len(a) - len(b)) > 1:
+        return False
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
+def _same_words(x: set, y: set) -> bool:
+    return all(any(_near(a, b) for b in y) for a in x) and all(any(_near(b, a) for a in x) for b in y)
+
+
 def _closest(row: dict, same: list[dict]) -> list[dict]:
     """(26 Nov) Several products pass the name test (silver / gold, brushed / mirror, one / two metres of the same
-    panel). The one whose words are exactly the row's words, and alone in that, is the product."""
+    panel). The one whose words are the row's words (a one-letter typo allowed), and alone in that, is the product."""
     lw, ln = words_nums(row.get("name", ""))
-    exact = [o for o in same if o["_wn"][0] == lw and o["_wn"][1] == ln]
+    exact = [o for o in same if o["_wn"][1] == ln and _same_words(o["_wn"][0], lw)]
     return exact if len(exact) == 1 else []
+
+
+# Words that make two look-alike products different (colour, finish, size, series). Two names with the same of
+# these, and the row's numbers in the product's, are the same product even when other words differ
+# («ورق ۱ میل نگیر» on the site, «و ق میل ثابت» read from the list).
+ATTR_WORDS = {"نقره‌ای", "نقره", "طلایی", "دودی", "مشکی", "سفید", "خشدار", "میرور", "لیزری", "لمسی", "شیشه‌ای",
+              "یک", "دو", "سه", "یکمتری", "دومتری", "بیضی", "میتسوبیشی", "لبخند", "قوس", "اکونومی", "اقتصادی",
+              "توکار", "روکار", "دوبلکس", "پلکسی", "تک", "شش", "تاچ", "آمتال", "اپل", "لاتیس", "سگمنت", "ریزشی"}
+
+
+def _attrs(words: set) -> set:
+    return {w for w in words if any(_near(w, a) for a in ATTR_WORDS)}
+
+
+def _by_attrs(row: dict, items: list[dict]) -> list[dict]:
+    """(26 Nov) The one product with exactly the row's colour / finish / size words (and its numbers). A
+    suggestion to tick, not a sure match: it saves a model call and a person's search."""
+    lw, ln = words_nums(row.get("name", ""))
+    ra = _attrs(lw)
+    if len(ra) < 2:
+        return []
+    hit = [o for o in items if ln <= o["_wn"][1] and _same_words(_attrs(o["_wn"][0]), ra)
+           and len(lw & o["_wn"][0]) >= 0.6 * len(lw)]
+    return hit if len(hit) == 1 else []
 
 
 def _head(name: str) -> str:
@@ -132,7 +170,7 @@ _KIND_SKIP = {"های", "ها", "قطر", "سایز", "خارجی", "داخلی"
 
 # Words that make a fitting another kind of the same family (زانو خم, زانو دو سر کوپله, سه راه تبدیل, کلاهک H ...).
 _SUBKIND = {"خم", "دو", "کوپله", "ترمزدار", "تخت", "پله", "انبساطی", "تبدیل", "h", "چند", "منظوره", "تعمیری", "کوتاه",
-            "بلند", "یکطرفه", "دوطرفه"}
+            "بلند", "یکطرفه", "دوطرفه", "اکونومی", "اقتصادی"}   # (26 Nov) an economy panel is a cheaper product
 
 
 def _same_kind(row: dict, offer: dict) -> bool:
@@ -256,11 +294,16 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
             if len(same) == 1 or best:
                 res.update(status="green", how="name", offers=[_brief((best or same)[0])])
             elif same:
-                res.update(status="yellow", how="name_many", cands=[_brief(o) for o in same[:8]])
+                one = _by_attrs(r, same)
+                res.update(status="yellow", how="name_attr" if one else "name_many",
+                           offers=[_brief(one[0])] if one else [], cands=[_brief(o) for o in same[:8]])
             else:
                 cands = _cands(r, offers)
                 res["cands"] = [_brief(o) for o in cands]
-                if cands:
+                one = _by_attrs(r, cands)
+                if one:
+                    res.update(status="yellow", how="attr", offers=[_brief(one[0])])
+                elif cands:
                     todo.append((res, cands))
         out.append(res)
 
