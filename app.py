@@ -161,6 +161,23 @@ def _run(job: Path, meta: dict) -> None:
             log.info("callback %s: %s", job.name, e)
 
 
+@app.get("/jobs/{jid}/index")
+def job_index(jid: str, file: str = "", x_pl_token: str | None = Header(None)):
+    """(26 Nov) What each page of a picture-only catalog shows (cached in the job's index-<file>.json)."""
+    import pypdfium2 as pdfium
+    from pl.catalog_index import index
+    _auth(x_pl_token)
+    if not re.fullmatch(r"[\w\-]{10,60}", jid) or not (DATA / jid / "files").is_dir():
+        raise HTTPException(status_code=404)
+    files = sorted((DATA / jid / "files").iterdir())
+    path = next((f for f in files if f.name == Path(file).name), None) if file else next(
+        (f for f in files if f.suffix.lower() == ".pdf"), None)
+    if not path or path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=404, detail="no pdf in this job")
+    n = len(pdfium.PdfDocument(str(path)))
+    return index(path, n, DATA / jid / f"index-{path.stem}.json")
+
+
 @app.get("/jobs/{jid}/photo")
 def job_photo(jid: str, label: str, name: str, q: str = "", x_pl_token: str | None = Header(None)):
     """The picture of one row's product, cut from the page the row was read on (label: 'list.pdf ص3' or a file)."""

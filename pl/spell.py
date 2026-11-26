@@ -20,7 +20,10 @@ TRADE_WORDS = """
 آبیاری فشار قوی ضعیف استخری استیل برنجی برنج گالوانیزه آلومینیوم چدنی چدن مسی فلنج واشر لاستیکی اورینگ
 نوار تفلون مغزی رابط کلید پریز کابل سیم جعبه تقسیم قوطی سینی کانال داکت ترانکینگ هواکش ونت مانیفولد
 شلنگ شیلنگ پمپ کوپلینگ گیربکس الکتروموتور یاتاقان بلبرینگ تسمه پولی چرخدنده
+برد مبدل کدینگ کاناله نمراتور لاتیس سگمنت ریزشی دات فوتوفریم نمایشگر کارتخوان تلفن آیفون ارتباط داخلی شستی احضار
+پنل کابین طبقه طبقات عکس فیلم اینچ فریم قاب لولایی اکونومی اقتصادی لمسی شیشه سکوریت خشدار میرور طلایی نقره دودی
 """
+# (26 Nov) «برد» (a board) was «corrected» to «برند» and «وطبقات» stayed one word: elevator words are known words.
 
 _WORD = re.compile(r"^[؀-ۿ]+$")
 
@@ -68,6 +71,10 @@ def fix_names(rows: list[dict], offers: list[dict]) -> int:
         name = str(r.get("name") or "")
         parts, notes = [], []
         for tok in norm_text(name).split():
+            if tok not in vocab and len(tok) >= 4 and tok.startswith("و") and tok[1:] in vocab:
+                notes.append(f"{tok}←و {tok[1:]}")             # «وطبقات»: «و» stuck to the next word
+                parts.extend(["و", tok[1:]])
+                continue
             good = fix_word(tok, vocab)
             if good:
                 notes.append(f"{tok}←{good}")

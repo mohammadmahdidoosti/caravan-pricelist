@@ -85,3 +85,19 @@ def test_six_hundred_thousand_is_plain():
     from pl.read import merge
     r = merge([{"name": "کلید 206", "model": "", "price": "600,000", "unit": "thousand_toman"}])[0]
     assert r["toman"] == 600_000
+
+
+def test_elevator_words_are_not_corrected():
+    from pl.spell import fix_names
+    rows = [{"name": "برد ریزشی دودات"}, {"name": "نمایشگر عکس وطبقات 8 اینچ"}, {"name": "کارتخوان تک کانله"}]
+    fix_names(rows, [{"name": "برند آریانا نوین"}])
+    assert rows[0]["name"].startswith("برد ")
+    assert "و طبقات" in rows[1]["name"]
+    assert "کاناله" in rows[2]["name"]
+
+
+def test_catalog_index_find():
+    from pl.catalog_index import find
+    idx = {"pages": {"39": ["COP panel", "ECONOMY"], "74": ["Control board"], "12": ["display/monitor", "COP panel"]}}
+    assert find(idx, ["economy"]) == [39]
+    assert find(idx, ["panel", "display"])[0] == 12
