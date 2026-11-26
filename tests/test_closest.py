@@ -73,3 +73,15 @@ def test_same_attributes_is_a_suggestion():
 def test_economy_is_another_product():
     st, n = _one("شستی احضار طبقه اکونومی طرح میتسوبیشی طلایی با کلید 204")
     assert n == ""
+
+
+def test_sheet_thickness_misread():
+    from pl.text import same_by_name
+    assert same_by_name("پنل شستی کابین آریانا یک متری نقره‌ای خشدار با عرض 18.5 (ورق 0.7 نگیر)",
+                        "پنل شستی کابین آریانا یک متری نقره ای خشدار با عرض 18.5 ورق 7 نگیر")
+
+
+def test_six_hundred_thousand_is_plain():
+    from pl.read import merge
+    r = merge([{"name": "کلید 206", "model": "", "price": "600,000", "unit": "thousand_toman"}])[0]
+    assert r["toman"] == 600_000

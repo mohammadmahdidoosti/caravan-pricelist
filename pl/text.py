@@ -66,6 +66,8 @@ def same_by_name(product_name: str, list_name: str) -> bool:
     """Every number of the row is in the product's name, and most words of each are in the other."""
     lw, ln = words_nums(list_name)
     pw, pn = words_nums(product_name)
+    # (26 Nov) «ورق 0.7» is read as «ورق 7» from small print: a «0.x» of the product also answers a row's «x»
+    pn = pn | {n[2:] for n in pn if n.startswith("0.")}
     if not lw or not pw or not ln <= pn:
         return False
     return len(lw & pw) >= 0.8 * len(lw) and len(lw & pw) >= 0.6 * len(pw)

@@ -652,9 +652,9 @@ def merge(rows: list[dict], unit_hint: str = "auto") -> list[dict]:
             (unit_hint if unit_hint in ("rial", "toman") else "")
         raw = re.sub(r"\D", "", str(r.get("price") or "").translate(FA_DIGITS).split(".")[0] if unit.startswith("thousand") and
                      re.fullmatch(r"[\d۰-۹]+[.,/][\d۰-۹]{1,2}", str(r.get("price") or "").strip()) else str(r.get("price") or "").translate(FA_DIGITS))
-        if unit.startswith("thousand") and raw and int(raw) >= 1_000_000:
+        if unit.startswith("thousand") and raw and int(raw) >= 100_000:
             # (26 Nov) Ariana Novin: «5,500,000» read as thousand toman (5.5 billion). A price printed in thousands
-            # has no million in it.
+            # has no million in it (and «600,000» for a key is 600 thousand toman, not 600 million).
             unit = unit.replace("thousand_", "")
         t = to_toman(r.get("price"), unit) if unit and r.get("price") else None
         notes = []
