@@ -7,8 +7,10 @@ layer checks every read price against its own page text (free).
 """
 from __future__ import annotations
 
+import copy
 import csv
 import io
+import json
 import logging
 import os
 import re
@@ -581,14 +583,22 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
                 failed.append(f"{label}: خوانده نشد")
             if progress:
                 progress(n, len(pics))
-    # pages whose reading looks wrong go up the ladder (in parallel, each page at its own pace)
-    todo = [pg for pg in pages.values() if bad_rows(pg["rows"])]
+    # pages whose reading looks wrong go up the ladder (in parallel, each page at its own pace) — unless the PDF's
+    # own text settles every doubtful row: the catalog is the reference and its printed price wins anyway.
+    # (27 Nov, روکا گستر) all three pages climbed to the strong model for 3-21 doubtful rows each: 77% of the
+    # list's cost, and the final prices came from the text all the same.
+    left = text_left(other_files(files), pages, unit_hint)
+    for label, pg in pages.items():
+        if bad_rows(pg["rows"]) and left.get(label) == 0:
+            pg["text_ok"] = True
+    todo = [pg for pg in pages.values() if bad_rows(pg["rows"]) and not pg.get("text_ok")]
     if todo:
         with ThreadPoolExecutor(4) as ex:
             for cost, c in ex.map(lambda pg: climb(pg), todo):
                 for k, v in cost.items():
                     spent[k] = spent.get(k, 0.0) + v
                 calls += c
+    other = copy.deepcopy(rows)                      # rows read from text layers and sheets, before the text check
     for pg in pages.values():
         rows += pg["rows"]
     _check_with_text(files, rows, unit_hint)
@@ -596,13 +606,89 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
     spent["read"] = spent.get("read", 0.0) + usd     # the sheets read as text
     return {"rows": items, "usd": round(sum(spent.values()), 4), "calls": calls, "failed": failed, "pages": len(pics),
             "cost": {k: round(v, 4) for k, v in spent.items()}, "ladder": ladder_report(pages), "_pages": pages,
-            "_raw": rows}
+            "_raw": rows, "_other": other}
+
+
+def other_files(files: list[Path]) -> list[Path]:
+    return [f for f in files if f.name.lower().endswith(".pdf")]
+
+
+def text_left(files: list[Path], pages: dict, unit_hint: str) -> dict[str, int]:
+    """Doubtful rows of each page that the PDF's text does not settle (tried on copies; nothing is changed).
+    A page with no text layer keeps all of its doubtful rows."""
+    if not files or not pages:
+        return {}
+    copies = {label: [dict(r) for r in pg["rows"]] for label, pg in pages.items()}
+    flat = [r for rs in copies.values() for r in rs]
+    try:
+        _check_with_text(files, flat, unit_hint)
+    except Exception as e:                               # noqa: BLE001 - then the ladder decides, as before
+        log.warning("text_left: %s", e)
+        return {}
+    out = {}
+    for label, rs in copies.items():
+        out[label] = sum(1 for r in rs if r.get("check") and not _settled(r["check"]))
+    return out
+
+
+def priced_text_pages(files: list[Path]) -> set[str]:
+    """Labels of PDF pages whose own text prints prices (five or more comma-grouped numbers): the catalog itself."""
+    out: set[str] = set()
+    t0 = time.monotonic()
+    for f in files:
+        if not f.name.lower().endswith(".pdf"):
+            continue
+        try:
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(str(f))
+            try:
+                for i in range(len(pdf)):
+                    if time.monotonic() - t0 > 30:
+                        return out
+                    t = pdf[i].get_textpage().get_text_range() or ""
+                    if len(re.findall(r"\d{1,3}(?:,\d{3})+", t)) >= 5:
+                        out.add(f"{f.name} ص{i + 1}")
+            finally:
+                pdf.close()
+        except Exception as e:                           # noqa: BLE001
+            log.warning("priced_text_pages %s: %s", f.name, e)
+    return out
+
+
+def _settled(note: str) -> bool:
+    return note.startswith("قیمت از متن خود PDF") or "مال کد دیگری در همین صفحه است" in note
+
+
+def save_readings(got: dict, path: Path) -> None:
+    """What the models said, kept with the job (no pictures): enough to rebuild the result without asking again."""
+    pages = {label: {"label": label, "file": pg["file"].name, "readings": pg["readings"], "check": pg.get("check"),
+                     "why": pg.get("why", ""), "text_ok": pg.get("text_ok", False)}
+             for label, pg in got["_pages"].items()}
+    path.write_text(json.dumps({"pages": pages, "other": got.get("_other", []), "failed": got.get("failed", []),
+                                "n_pages": got.get("pages", 0)}, ensure_ascii=False))
+
+
+def load_readings(path: Path, files_dir: Path, unit_hint: str = "auto") -> dict:
+    """A job's result rebuilt from its kept readings and the current code: no model is asked, nothing is paid."""
+    d = json.loads(path.read_text())
+    pages = {}
+    for label, pg in d["pages"].items():
+        pg = dict(pg)
+        pg["file"] = files_dir / pg["file"]
+        pg["readings"] = [tuple(x) for x in pg["readings"]]
+        pg["rows"] = page_rows(pg)
+        pages[label] = pg
+    got = {"_pages": pages, "_other": d.get("other", []), "_raw": [], "failed": d.get("failed", []),
+           "pages": d.get("n_pages", len(pages)), "calls": 0, "usd": 0.0, "cost": {}}
+    remerge(got, unit_hint)
+    return got
 
 
 def remerge(got: dict, unit_hint: str = "auto") -> None:
     """After some pages were read again: the list's rows from the pages' current readings."""
-    rows = [r for r in got["_raw"] if r.get("file") not in got["_pages"]]
+    rows = copy.deepcopy(got["_other"]) if "_other" in got else [r for r in got["_raw"] if r.get("file") not in got["_pages"]]
     for pg in got["_pages"].values():
+        pg["rows"] = page_rows(pg)                   # fresh from the readings: the last text check changed them
         rows += pg["rows"]
     _check_with_text(list(dict.fromkeys(pg["file"] for pg in got["_pages"].values())), rows, unit_hint)
     got["rows"] = merge(rows, unit_hint)
@@ -617,6 +703,7 @@ def ladder_report(pages: dict) -> dict:
         out["pages"][stage_name(m) if m else "read"] = out["pages"].get(stage_name(m) if m else "read", 0) + 1
     out["up"] = [{"page": pg["label"], "models": [x[0] for x in pg["readings"]], "why": pg.get("why", "")}
                  for pg in pages.values() if len(pg["readings"]) > 1][:50]
+    out["text_ok"] = sum(1 for pg in pages.values() if pg.get("text_ok"))   # doubts settled by the PDF's text, no climb
     return out
 
 
@@ -670,15 +757,23 @@ def read_stage(pg: dict, model: str) -> dict:
         k_answers, c2, n2, _ = _ask_parts(pg["parts"], CHECK_SYSTEM, "List every model code and its price.", model, 6000)
         k = {"rows": [r for j in k_answers if isinstance(j, dict) for r in (j.get("rows") or []) if isinstance(r, dict)]}
         pg["check"] = k
-        cross_check(rows, k)
         cost["check"] = c2
         calls += n2
     pg["readings"].append((model, rows if ok or rows else None))
-    pg["rows"] = vote(pg) if len(pg["readings"]) > 1 else rows
-    if len(pg["readings"]) == 1:
-        digit_check(pg["rows"])
+    pg["rows"] = page_rows(pg)
     pg["_calls"] = pg.get("_calls", 0) + calls
     return cost
+
+
+def page_rows(pg: dict) -> list[dict]:
+    """(27 Nov) A page's rows from its stored readings alone (no model asked): the readings are kept as the models
+    gave them, so a fix of this code can be tried on an old list for free (/jobs/{id}/recheck)."""
+    if len(pg["readings"]) > 1:
+        return vote(pg)
+    rows = [dict(r) for r in (pg["readings"][0][1] or [])] if pg["readings"] else []
+    cross_check(rows, pg.get("check"))
+    digit_check(rows)
+    return rows
 
 
 def climb(pg: dict, why: str = "") -> tuple[dict, int]:

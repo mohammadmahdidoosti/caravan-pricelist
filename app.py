@@ -31,7 +31,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from pl import llm
 from pl.match import match, unmatched_offers
-from pl.read import climb, ladder, read_files, remerge
+from pl.read import climb, ladder, load_readings, priced_text_pages, read_files, remerge, save_readings
 from pl.spell import fix_names
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -110,48 +110,66 @@ def _run(job: Path, meta: dict) -> None:
         served0 = dict(llm.SERVED)
         got = read_files(files, meta.get("unit_hint") or "auto",
                          progress=lambda n, t: _save(job, {"progress": round(n / max(t, 1) * 0.8, 2)}))
-        _save(job, {"status": "matching", "progress": 0.85})
-        offers = meta.get("offers") or []
-        fix_names(got["rows"], offers)               # a word misread from a fancy title font
-        m = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
-        # (26 Nov) a page with many prices far from the seller's current ones is read again by the next model of
-        # the ladder (a whole poster read with its first digits dropped looked «-95%» on every row)
-        far: dict[str, list] = {}
-        for r in m["rows"]:
-            if r.get("change_pct") is not None:
-                far.setdefault(r.get("file", ""), []).append(abs(r["change_pct"]) >= FAR_PCT)
-        again = [pg for label, pg in got["_pages"].items()
-                 if len(pg["readings"]) < len(ladder()) and sum(far.get(label, [])) >= 2
-                 and sum(far.get(label, [])) * 2 >= len(far.get(label, []))]
-        if again:
-            _save(job, {"status": "reading", "progress": 0.82})
-            for pg in again:
-                n = sum(far.get(pg["label"], []))
-                cost, c = climb(pg, f"{n} قیمت بیش از {FAR_PCT}٪ با قیمت فعلی فروشنده فرق داشت")
-                for k, v in cost.items():
-                    got["cost"][k] = round(got["cost"].get(k, 0.0) + v, 4)
-                got["calls"] += c
-            got["usd"] = round(sum(got["cost"].values()), 4)
-            remerge(got, meta.get("unit_hint") or "auto")
-            fix_names(got["rows"], offers)
-            m2 = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
-            m2["usd"] = round(m["usd"] + m2["usd"], 4)
-            m = m2
-        miss = unmatched_offers(m["rows"], offers)
-        result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": miss[:300], "not_in_list_count": len(miss),
-                  "failed": got["failed"], "pages": got["pages"], "calls": got["calls"],
-                  "usd": round(got["usd"] + m["usd"], 4), "model": llm.model(),
-                  # where the money went: first reading, second (check) reading, matching; and who answered
-                  "cost": {**got.get("cost", {}), "match": round(m["usd"], 4)},
-                  "served": {k: v - served0.get(k, 0) for k, v in llm.SERVED.items() if v - served0.get(k, 0) > 0},
-                  "provider": ",".join((llm.provider() or {}).get("order", [])) or "auto",
-                  "ladder": got.get("ladder", {})}
-        (job / "result.json").write_text(json.dumps(result, ensure_ascii=False))
-        _save(job, {"status": "done", "progress": 1, "done_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "counts": m["counts"], "usd": result["usd"]})
+        _finish(job, meta, got, served0, files)
     except Exception as e:                               # noqa: BLE001
         log.exception("job %s", job.name)
         _save(job, {"status": "failed", "error": str(e)[:300]})
+    _callback(job, meta)
+
+
+def _finish(job: Path, meta: dict, got: dict, served0: dict, files: list[Path], may_read: bool = True) -> None:
+    """Match the read rows, maybe read far-off pages again, write result.json and keep the readings."""
+    _save(job, {"status": "matching", "progress": 0.85})
+    offers = meta.get("offers") or []
+    fix_names(got["rows"], offers)               # a word misread from a fancy title font
+    m = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
+    # (26 Nov) a page with many prices far from the seller's current ones is read again by the next model of
+    # the ladder (a whole poster read with its first digits dropped looked «-95%» on every row)
+    far: dict[str, list] = {}
+    for r in m["rows"]:
+        if r.get("change_pct") is not None:
+            far.setdefault(r.get("file", ""), []).append(abs(r["change_pct"]) >= FAR_PCT)
+    # (27 Nov) not a page whose own PDF text prints the prices: the catalog is the reference, a far price is real
+    printed = priced_text_pages(files) if may_read else set()
+    again = [pg for label, pg in got["_pages"].items()
+             if may_read and label not in printed
+             and len(pg["readings"]) < len(ladder()) and sum(far.get(label, [])) >= 2
+             and sum(far.get(label, [])) * 2 >= len(far.get(label, []))]
+    if again:
+        _save(job, {"status": "reading", "progress": 0.82})
+        for pg in again:
+            n = sum(far.get(pg["label"], []))
+            cost, c = climb(pg, f"{n} قیمت بیش از {FAR_PCT}٪ با قیمت فعلی فروشنده فرق داشت")
+            for k, v in cost.items():
+                got["cost"][k] = round(got["cost"].get(k, 0.0) + v, 4)
+            got["calls"] += c
+        got["usd"] = round(sum(got["cost"].values()), 4)
+        remerge(got, meta.get("unit_hint") or "auto")
+        fix_names(got["rows"], offers)
+        m2 = match(got["rows"], offers, meta.get("aliases") or {}, float(meta.get("big_pct") or 20))
+        m2["usd"] = round(m["usd"] + m2["usd"], 4)
+        m = m2
+    miss = unmatched_offers(m["rows"], offers)
+    result = {"rows": m["rows"], "counts": m["counts"], "not_in_list": miss[:300], "not_in_list_count": len(miss),
+              "failed": got["failed"], "pages": got["pages"], "calls": got["calls"],
+              "usd": round(got["usd"] + m["usd"], 4), "model": llm.model(),
+              # where the money went: first reading, second (check) reading, matching; and who answered
+              "cost": {**got.get("cost", {}), "match": round(m["usd"], 4)},
+              "served": {k: v - served0.get(k, 0) for k, v in llm.SERVED.items() if v - served0.get(k, 0) > 0},
+              "provider": ",".join((llm.provider() or {}).get("order", [])) or "auto",
+              "ladder": got.get("ladder", {})}
+    if not may_read:
+        result["recheck"] = True                     # rebuilt from the kept readings: no reading was paid
+    try:
+        save_readings(got, job / "readings.json")
+    except Exception as e:                           # noqa: BLE001 - a result without kept readings is still a result
+        log.warning("save readings %s: %s", job.name, e)
+    (job / "result.json").write_text(json.dumps(result, ensure_ascii=False))
+    _save(job, {"status": "done", "progress": 1, "done_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "counts": m["counts"], "usd": result["usd"]})
+
+
+def _callback(job: Path, meta: dict) -> None:
     cb = meta.get("callback_url")
     if cb and re.match(r"^https://", str(cb)):
         try:
@@ -305,6 +323,38 @@ async def create_pull_job(body: dict, x_pl_token: str | None = Header(None)):
     _save(job, {"id": jid, "status": "queued", "progress": 0, "created": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "files": len(files), "pulled": True})
     threading.Thread(target=_pull_and_run, args=(job, body), daemon=True).start()
+    return {"id": jid}
+
+
+def _recheck(job: Path, body: dict) -> None:
+    meta: dict = {}
+    try:
+        _save(job, {"status": "downloading", "progress": 0})
+        meta = json.loads(_download(body["meta_url"], 40 * 1024 * 1024).decode("utf-8"))
+        served0 = dict(llm.SERVED)
+        got = load_readings(job / "readings.json", job / "files", meta.get("unit_hint") or "auto")
+        _finish(job, meta, got, served0, sorted((job / "files").iterdir()), may_read=False)
+    except Exception as e:                               # noqa: BLE001
+        log.exception("recheck %s", job.name)
+        _save(job, {"status": "failed", "error": f"بررسی دوباره نشد: {e}"[:300]})
+    _callback(job, meta)
+
+
+@app.post("/jobs/{jid}/recheck")
+async def recheck_job(jid: str, body: dict, x_pl_token: str | None = Header(None)):
+    """(27 Nov) A read list again with today's code, from the readings kept with it: no model reads a page, only the
+    matching runs (a fraction of a cent). Lists read before 27 Nov have no kept readings: 409."""
+    _auth(x_pl_token)
+    if not re.fullmatch(r"[\w\-]{10,60}", jid) or not _pull_ok(body.get("meta_url", "")):
+        raise HTTPException(status_code=400, detail="bad job or meta_url")
+    job = DATA / jid
+    if not (job / "readings.json").exists():
+        raise HTTPException(status_code=409, detail="خوانده‌های این لیست نگه داشته نشده؛ فقط «دوباره بخوان» ممکن است")
+    st = json.loads((job / "job.json").read_text()).get("status") if (job / "job.json").exists() else ""
+    if st in ("queued", "downloading", "reading", "matching"):
+        raise HTTPException(status_code=409, detail="این لیست همین حالا در حال خواندن است")
+    _save(job, {"status": "queued", "progress": 0})
+    threading.Thread(target=_recheck, args=(job, body), daemon=True).start()
     return {"id": jid}
 
 
