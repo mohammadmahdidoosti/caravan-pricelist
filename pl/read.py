@@ -836,7 +836,7 @@ def _table_codes(text: str) -> dict[str, tuple[int, str]]:
     return out
 
 
-def _table_price(codes: dict, code: str, name: str) -> tuple[str, int] | None:
+def _table_price(codes: dict, code: str, name: str, price: int = 0) -> tuple[str, int] | None:
     """The printed code and price for a row's code. A Persian zero is a dot the picture reading often drops
     («۴۲۰۱» read as 421): a code matches when it is the same without its zeros, and only one printed code does.
     The cell's size must be in the row's name (a 20*1/2 row is not the 25*1/2 cell)."""
@@ -846,11 +846,15 @@ def _table_price(codes: dict, code: str, name: str) -> tuple[str, int] | None:
         bare = code.replace("0", "")
         hits = [k for k in codes if len(k) > len(code) and k.replace("0", "") == bare]
         if not hits:
-            # one digit misread («2207» for 3207): the printed code that differs by one digit and whose cell
-            # carries the row's exact size (40*20*40)
-            sizes = set(re.findall(r"\d+(?:\*\d+(?:/\d+)?)+", str(name or "").translate(FA_DIGITS)))
-            hits = [k for k, (_, sz) in codes.items() if len(k) == len(code)
-                    and sum(a != b for a, b in zip(k, code)) == 1 and sizes & set(sz.split())]
+            # one digit misread («2207» for 3207; «691» for 6401, its zero dropped too): the printed code that
+            # differs by one digit and whose cell's size is the row's own (40*20*40, 20)
+            sizes = set(re.findall(r"\d+(?:[*/]\d+)*", str(name or "").translate(FA_DIGITS)))
+            forms = {code} | ({code[:j] + "0" + code[j:] for j in range(len(code) + 1)} if len(code) < 4 else set())
+            # A size printed in many cells (20, 20*1/2) only counts when the read price is that cell's too.
+            last = [sz.split()[-1] for _, sz in codes.values() if sz.split()]
+            hits = [k for k, (p, sz) in codes.items() if sz.split() and sz.split()[-1] in sizes
+                    and any(len(k) == len(f) and sum(a != b for a, b in zip(k, f)) == 1 for f in forms)
+                    and (last.count(sz.split()[-1]) == 1 or p == price)]
     if len(hits) != 1:
         return None
     price, size = codes[hits[0]]
@@ -919,7 +923,7 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
                     r.pop("check", None)                 # the page's text agrees with the first reading
                 continue
         tab = tables.get(r.get("file", "")) if raw and re.fullmatch(r"\d{3,6}", code) else None
-        hit = _table_price(tab, code, r.get("name", "")) if tab else None
+        hit = _table_price(tab, code, r.get("name", ""), int(raw)) if tab else None
         if hit:
             printed, got = hit
             if printed != code:
@@ -930,7 +934,7 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
             elif "خواندن دوم" in str(r.get("check") or ""):
                 r.pop("check", None)
             continue
-        if raw and tab and any(p == int(raw) for p, _ in tab.values()):
+        if raw and tab and any(p == int(raw) and k.replace("0", "") != code.replace("0", "") for k, (p, _) in tab.items()):
             # (27 Nov) «2413 زانو 45 درجه 75» has no price in the catalog; the picture reading gave it the price
             # of 2411 next to it. A price that belongs to another printed code is not this row's.
             r["price"] = ""

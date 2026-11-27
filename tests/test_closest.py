@@ -318,3 +318,11 @@ def test_glued_cells_and_one_digit_misread_code():
     assert t["3207"][0] == 1329051 and t["4301"][0] == 3725131 and t["6103"][0] == 2744678
     assert _table_price(t, "2207", "سه راهی تبدیل 40*20*40") == ("3207", 1329051)
     assert _table_price(t, "2205", "سه راهی تبدیل 40*20*40") is None
+
+
+def test_misread_code_with_common_size_needs_its_price():
+    from pl.read import _table_codes, _table_price
+    t = _table_codes("7,110,857 40 20 6401\n1,110,857 40 20 6501\n2,517,131 150 20*1/2 6201")
+    assert _table_price(t, "691", "شیر تکضرب 20", 7110857) == ("6401", 7110857)
+    assert _table_price(t, "691", "شیر تکضرب 20", 7110000) is None
+    assert _table_price(t, "6301", "سه راهی 20*1/2", 123) is None
