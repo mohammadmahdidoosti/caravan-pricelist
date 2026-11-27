@@ -799,7 +799,12 @@ def _table_codes(text: str) -> dict[str, tuple[int, str]]:
     code_re = re.compile(r"\d{3,6}")
     num = re.compile(r"[\d*/.]+|-")                  # «-»: a size or count left empty
     for line in text.splitlines():
-        tok = line.translate(FA_DIGITS).replace("٬", ",").split()
+        tok = []
+        for t in line.translate(FA_DIGITS).replace("٬", ",").split():
+            # the text layer glues neighbouring cells: «3,725,13124» is 3,725,131 and a count of 24,
+            # «61032,744,678» is the code 6103 and 2,744,678
+            m = re.fullmatch(r"(\d{1,3}(?:,\d{3})+)(\d{1,3})", t) or re.fullmatch(r"(\d{4})(\d{1,3}(?:,\d{3})+)", t)
+            tok += [m.group(1), m.group(2)] if m else [t]
         for i, w in enumerate(tok):
             if not _PRICE_TOK.fullmatch(w):
                 continue
@@ -823,9 +828,9 @@ def _table_codes(text: str) -> dict[str, tuple[int, str]]:
                 if k > 0 and _PRICE_TOK.fullmatch(tok[k - 1]):
                     continue
                 back = tok[k:i]
-                if len(back) < 2 or not code_re.fullmatch(back[0]):
+                if not back or not code_re.fullmatch(back[0]) or not (back[1:] or run):
                     continue
-                code, mid = back[0], back[1:][::-1]
+                code, mid = back[0], (back[1:][::-1] or run)
             if code not in out:
                 out[code] = (int(w.replace(",", "")), " ".join(mid))
     return out
@@ -840,6 +845,12 @@ def _table_price(codes: dict, code: str, name: str) -> tuple[str, int] | None:
     else:
         bare = code.replace("0", "")
         hits = [k for k in codes if len(k) > len(code) and k.replace("0", "") == bare]
+        if not hits:
+            # one digit misread («2207» for 3207): the printed code that differs by one digit and whose cell
+            # carries the row's exact size (40*20*40)
+            sizes = set(re.findall(r"\d+(?:\*\d+(?:/\d+)?)+", str(name or "").translate(FA_DIGITS)))
+            hits = [k for k, (_, sz) in codes.items() if len(k) == len(code)
+                    and sum(a != b for a, b in zip(k, code)) == 1 and sizes & set(sz.split())]
     if len(hits) != 1:
         return None
     price, size = codes[hits[0]]
@@ -918,6 +929,12 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
                 r["check"] = f"قیمت از متن خود PDF برداشته شد ({got:,}؛ از روی تصویر {int(raw):,} خوانده شده بود)"
             elif "خواندن دوم" in str(r.get("check") or ""):
                 r.pop("check", None)
+            continue
+        if raw and tab and any(p == int(raw) for p, _ in tab.values()):
+            # (27 Nov) «2413 زانو 45 درجه 75» has no price in the catalog; the picture reading gave it the price
+            # of 2411 next to it. A price that belongs to another printed code is not this row's.
+            r["price"] = ""
+            r["check"] = f"قیمت {int(raw):,} مال کد دیگری در همین صفحه است؛ این ردیف در کاتالوگ قیمت ندارد"
             continue
         if raw and int(raw) not in nums and int(raw) * 10 not in nums and int(raw) // 10 not in nums:
             r["check"] = "قیمت خوانده‌شده در متن صفحه پیدا نشد؛ بررسی کنید"

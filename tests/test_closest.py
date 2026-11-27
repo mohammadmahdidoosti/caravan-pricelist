@@ -308,3 +308,13 @@ def test_table_cells_end_at_words_and_missing_prices():
     got = _table_codes(t)
     assert got["2409"][0] == 2198084 and got["2411"][0] == 3025198
     assert got["4001"][0] == 1616905 and "2413" not in got and got["3011"][0] == 5930110
+
+
+def test_glued_cells_and_one_digit_misread_code():
+    from pl.read import _table_codes, _table_price
+    t = _table_codes("3207 40*20*40 30 1,329,051 قیمت تعداد\n"
+                     "قیمت تعداد اندازه کد راهی سه 3,725,13124 20*1/2 4301\n"
+                     "هرورزی 61032,744,678 80 25*3/4")
+    assert t["3207"][0] == 1329051 and t["4301"][0] == 3725131 and t["6103"][0] == 2744678
+    assert _table_price(t, "2207", "سه راهی تبدیل 40*20*40") == ("3207", 1329051)
+    assert _table_price(t, "2205", "سه راهی تبدیل 40*20*40") is None
