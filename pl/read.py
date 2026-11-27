@@ -954,13 +954,15 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
             continue
         brands = [r.get("brand") for r in rows if r.get("file") == label and r.get("brand")]
         brand = max(set(brands), key=brands.count) if brands else ""
+        units = [r.get("unit") for r in rows if r.get("file") == label and r.get("unit") not in (None, "", "unknown")]
+        unit = max(set(units), key=units.count) if units else ""
         seen = {re.sub(r"\D", "", str(r.get("price") or "").translate(FA_DIGITS)) for r in rows if r.get("file") == label}
         for code, (price, size) in tab.items():
             if code in used[label] or str(price) in seen:
                 continue                                 # a row with this price is this code, read wrong
             sz = size.split()[-1] if size.split() else ""
             rows.append({"brand": brand, "model": code, "name": f"کد {code}" + (f" سایز {sz}" if sz and sz != "-" else ""),
-                         "price": f"{price:,}", "file": label,
+                         "price": f"{price:,}", "file": label, **({"unit": unit} if unit else {}),
                          "check": "این کد در متن کاتالوگ قیمت دارد ولی از روی تصویر خوانده نشد؛ اسمش را از کاتالوگ بنویسید"})
     for pdf in docs:
         try:
