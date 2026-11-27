@@ -797,7 +797,7 @@ def _table_codes(text: str) -> dict[str, tuple[int, str]]:
     line: each short code (3-6 digits) with the comma-grouped price just before it and the cell's size."""
     out: dict[str, tuple[int, str]] = {}
     code_re = re.compile(r"\d{3,6}")
-    num = re.compile(r"[\d*/.]+")
+    num = re.compile(r"[\d*/.]+|-")                  # «-»: a size or count left empty
     for line in text.splitlines():
         tok = line.translate(FA_DIGITS).replace("٬", ",").split()
         for i, w in enumerate(tok):
