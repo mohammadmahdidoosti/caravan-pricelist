@@ -778,6 +778,46 @@ def _line_prices(tp, W: float, code: str) -> list[int] | None:
     return [int(g.replace(",", "")) for g in re.findall(r"(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])", line)]
 
 
+_PRICE_TOK = re.compile(r"\d{1,3}(?:,\d{3})+")
+
+
+def _table_codes(text: str) -> dict[str, tuple[int, str]]:
+    """(27 Nov, روکا گستر) A price table printed as «price  count  size  code» cells, two tables side by side on one
+    line: each short code (3-6 digits) with the comma-grouped price just before it and the cell's size."""
+    out: dict[str, tuple[int, str]] = {}
+    for line in text.splitlines():
+        tok = line.translate(FA_DIGITS).replace("٬", ",").split()
+        for i, w in enumerate(tok):
+            if not re.fullmatch(r"\d{3,6}", w) or w in out:
+                continue
+            for j in range(i - 1, max(-1, i - 5), -1):
+                if _PRICE_TOK.fullmatch(tok[j]):
+                    out[w] = (int(tok[j].replace(",", "")), " ".join(tok[j + 1:i]))
+                    break
+                if j < i - 1 and re.fullmatch(r"\d{3,6}", tok[j]):
+                    break                                # another cell's code: this code has no price of its own
+    return out
+
+
+def _table_price(codes: dict, code: str, name: str) -> tuple[str, int] | None:
+    """The printed code and price for a row's code. A Persian zero is a dot the picture reading often drops
+    («۴۲۰۱» read as 421): a code matches when it is the same without its zeros, and only one printed code does.
+    The cell's size must be in the row's name (a 20*1/2 row is not the 25*1/2 cell)."""
+    if code in codes:
+        hits = [code]
+    else:
+        bare = code.replace("0", "")
+        hits = [k for k in codes if len(k) > len(code) and k.replace("0", "") == bare]
+    if len(hits) != 1:
+        return None
+    price, size = codes[hits[0]]
+    want = set(re.findall(r"\d+", size))
+    have = set(re.findall(r"\d+", str(name or "").translate(FA_DIGITS)))
+    if want and have and not want & have:
+        return None
+    return hits[0], price
+
+
 def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> None:
     """A PDF with a text layer: a price read from the picture must be printed on its page (as read, or as toman
     or rial of it). Rows whose price is not there get a note and wait for a person.
@@ -786,6 +826,7 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
     that carries the row's code wins, and the note says so."""
     texts: dict[str, set] = {}
     pages: dict[str, tuple] = {}
+    tables: dict = {}
     docs = []
     t0 = time.monotonic()
     for f in files:
@@ -803,8 +844,15 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
                     break
                 tp = pdf[i].get_textpage()
                 label = f"{f.name} ص{i + 1}"
-                texts[label] = page_nums(tp.get_text_range() or "")
+                raw_text = tp.get_text_range() or ""
+                texts[label] = page_nums(raw_text)
                 pages[label] = (tp, pdf[i].get_size()[0])
+                tables[label] = raw_text                 # short catalog codes in price tables (27 Nov)
+            lines = pdf_text_pages(f)                    # its lines, when the page has real text, keep cells together
+            for i in range(len(pdf)):
+                label = f"{f.name} ص{i + 1}"
+                if label in tables:
+                    tables[label] = _table_codes(lines.get(i + 1) or tables[label])
         except Exception as e:                           # noqa: BLE001
             log.warning("text check %s: %s", f.name, e)
             continue
@@ -827,6 +875,18 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
                 elif "خواندن دوم" in str(r.get("check") or ""):
                     r.pop("check", None)                 # the page's text agrees with the first reading
                 continue
+        tab = tables.get(r.get("file", "")) if raw and re.fullmatch(r"\d{3,6}", code) else None
+        hit = _table_price(tab, code, r.get("name", "")) if tab else None
+        if hit:
+            printed, got = hit
+            if printed != code:
+                r["model"] = printed                     # the code as the catalog prints it
+            if int(raw) != got:
+                r["price"] = f"{got:,}"
+                r["check"] = f"قیمت از متن خود PDF برداشته شد ({got:,}؛ از روی تصویر {int(raw):,} خوانده شده بود)"
+            elif "خواندن دوم" in str(r.get("check") or ""):
+                r.pop("check", None)
+            continue
         if raw and int(raw) not in nums and int(raw) * 10 not in nums and int(raw) // 10 not in nums:
             r["check"] = "قیمت خوانده‌شده در متن صفحه پیدا نشد؛ بررسی کنید"
     for pdf in docs:

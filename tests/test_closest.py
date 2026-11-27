@@ -259,3 +259,24 @@ def test_longer_name_picks_its_own_product():
     offers = _offers(["زانو فلزی بست دار سایز ۲۰*۱/۲ روکا گستر", "زانو مغزی فلزی بست دار سایز ۲۰*۱/۲ روکا گستر"], brand="روکا گستر")
     r = match([_row("زانو مغزی فلزی بست دار 20*1/2")], offers, use_model=False)["rows"][0]
     assert r["offers"] and r["offers"][0]["offer_id"] == 2
+
+
+def test_table_code_with_dropped_zero_takes_text_price(tmp_path):
+    # 27 Nov (روکا گستر): two price tables side by side; the picture read «۴۲۰۱» as 421 and 2,198,084 as 3,198,084
+    from reportlab.pdfgen import canvas
+    from pl.read import _check_with_text
+    f = tmp_path / "rk.pdf"
+    c = canvas.Canvas(str(f))
+    c.drawString(20, 700, "1,713,659  70  20*1/2  4201    2,198,084  50  50  2409")
+    c.drawString(20, 680, "2,131,977  60  25*1/2  4203    3,025,198  25  63  2411")
+    c.drawString(20, 660, "-  15  75  2413")
+    c.save()
+    rows = [{"model": "421", "name": "زانو فلزی بست دار 20*1/2", "price": "1,713,659", "file": "rk.pdf ص1"},
+            {"model": "2409", "name": "زانو 45 درجه 50", "price": "3,198,084", "file": "rk.pdf ص1"},
+            {"model": "423", "name": "زانو فلزی بست دار 25*1/2", "price": "2,131,977", "file": "rk.pdf ص1"},
+            {"model": "2413", "name": "زانو 45 درجه 75", "price": "1,700,000", "file": "rk.pdf ص1"}]
+    _check_with_text([f], rows, "rial")
+    assert rows[0]["model"] == "4201" and rows[0]["price"] == "1,713,659" and "check" not in rows[0]
+    assert rows[1]["price"] == "2,198,084" and "PDF" in rows[1]["check"]
+    assert rows[2]["model"] == "4203"
+    assert rows[3]["price"] == "1,700,000"               # no price printed for 2413: nothing taken from 2411
