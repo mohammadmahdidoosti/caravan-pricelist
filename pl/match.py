@@ -383,7 +383,11 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
                 res.update(status="green", how="name", offers=[_brief((best or same)[0])])
             elif same:
                 one = _by_attrs(r, same)
-                res.update(status="yellow", how="name_attr" if one else "name_many",
+                how = "name_attr"
+                if not one:   # (27 Nov) «زانو مغزی فلزی بست دار» also passes as «زانو فلزی بست دار»: the plainest fit
+                    pick = _rule_pick(r, same)
+                    one, how = (pick, "name_rule") if len(pick) == 1 else ([], "name_many")
+                res.update(status="yellow", how=how,
                            offers=[_brief(one[0])] if one else [], cands=[_brief(o) for o in same[:8]])
             else:
                 cands = _cands(r, offers)

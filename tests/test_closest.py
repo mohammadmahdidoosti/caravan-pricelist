@@ -252,3 +252,10 @@ def test_text_pdf_pages_found(tmp_path):
     pages = pdf_text_pages(f)
     assert list(pages) == [1] and len(pages[1].splitlines()) == 12 and "2121710" in pages[1].splitlines()[0]
     assert _fa_order("ETIMAT مینیاتوری کلید 2137714") == "ETIMAT کلید مینیاتوری 2137714"
+
+
+def test_longer_name_picks_its_own_product():
+    # 27 Nov (محمد / روکا گستر): «زانو مغزی فلزی بست دار» passed the name test for «زانو فلزی بست دار» too and stayed grey
+    offers = _offers(["زانو فلزی بست دار سایز ۲۰*۱/۲ روکا گستر", "زانو مغزی فلزی بست دار سایز ۲۰*۱/۲ روکا گستر"], brand="روکا گستر")
+    r = match([_row("زانو مغزی فلزی بست دار 20*1/2")], offers, use_model=False)["rows"][0]
+    assert r["offers"] and r["offers"][0]["offer_id"] == 2
