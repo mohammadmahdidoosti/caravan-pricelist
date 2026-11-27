@@ -73,10 +73,15 @@ def _same_brand_text(a: str, b: str) -> bool:
     """(26 Nov) The reader joins or misspells a brand: «آریاناتوین», «آریانوین» for «آریانا نوین». Compared without
     spaces, close spellings are the same maker."""
     from difflib import SequenceMatcher
-    x, y = (re.sub(r"\s+", "", norm_text(t)) for t in (a, b))
+    fold = str.maketrans("گ", "ک")                       # (27 Nov) «روگاگستر» in the catalog, «روکا گستر» on the site
+    x, y = (re.sub(r"\s+", "", norm_text(t)).translate(fold) for t in (a, b))
     if len(x) < 4 or len(y) < 4:
         return False
-    return x in y or y in x or SequenceMatcher(None, x, y).ratio() >= 0.75
+    if x in y or y in x or SequenceMatcher(None, x, y).ratio() >= 0.75:
+        return True
+    # a brand line with the trade around it («اتصالات و لوله پلیمری روگاگستر»): one of its words is the maker
+    return any(len(w) >= 5 and w not in _BRAND_STOP and SequenceMatcher(None, w, y).ratio() >= 0.8
+               for w in norm_text(a).translate(fold).split())
 
 
 def _brand_guard(out: list[dict], by_id: dict) -> None:
@@ -107,6 +112,43 @@ def _brand_guard(out: list[dict], by_id: dict) -> None:
         else:
             res["status"] = "yellow"
         res["how"] = (res.get("how") or "") + "_guard"
+
+
+_WORD_SKIP = {"اندازه", "سایز", "سايز", "قطر", "درجه", "میلی", "متر", "mm", "cm", "با", "و", "برند", "مدل", "کد", "عدد"}
+
+
+# words that make a variant of the same family (thin wall, three-layer)
+_QUALIFIERS = {"نازک", "ضخیم", "rct", "pp-rct", "pert", "pex", "سه", "پنج", "لایه", "تلفیقی", "مغزی", "بست", "دوقلو"}
+
+
+def _word_guard(out: list[dict], by_id: dict, offers: list[dict]) -> None:
+    """(27 Nov, روکا گستر) «لوله تک لایه (نازک) PP-RCT» was offered «لوله تک لایه», «پل سه لایه» «پل», «شیر فلکه بست
+    دار» «شیر فلکه», «مهره ماسوره تلفیقی مغزی» «مهره ماسوره»: another product of the same family. A row whose name
+    carries a variant word the suggested product's name does not is not that product: the suggestion becomes a choice.
+    A variant word is a known one, or one the seller's other product names carry (so it tells his products apart);
+    a describing word no other name has («قطر خارجی») changes nothing."""
+    from collections import Counter
+    seen = Counter(w for o in offers for w in set(norm_text(o.get("name", "")).split()))
+    for res in out:
+        if not res["offers"] or res.get("how") in ("memory", "model"):
+            continue
+        o = by_id.get(str(res["offers"][0].get("offer_id")))
+        if not o:
+            continue
+        on = norm_text(o.get("name", ""))
+        ow, flat = set(on.split()), on.replace(" ", "").replace("\u200c", "")
+        skip = _WORD_SKIP | set(_brand_words(res)) | set(norm_text(o.get("brand") or "").split())
+        miss = [w for w in norm_text(res.get("name") or "").split()
+                if w not in skip and not re.search(r"\d", w) and len(w) >= 2
+                and not any(_near(w, x) for x in ow) and w.replace("\u200c", "") not in flat
+                and (w in _QUALIFIERS or seen[w] >= 2)]
+        if not miss:
+            continue
+        res["note"] = "؛ ".join(x for x in (res.get("note") or "", f"«{' '.join(miss)}» در اسم کالای پیشنهادی نیست؛ شاید کالای دیگری است") if x)
+        res["cands"] = res["offers"] + [c for c in res["cands"] if c.get("offer_id") != res["offers"][0].get("offer_id")]
+        res["offers"] = []
+        res["status"] = "yellow"
+        res["how"] = (res.get("how") or "") + "_words"
 
 
 def _near(a: str, b: str) -> bool:
@@ -416,6 +458,7 @@ def match(rows: list[dict], offers: list[dict], aliases: dict | None = None, big
 
     offers = all_offers
     _brand_guard(out, by_id)
+    _word_guard(out, by_id, offers)
     _infer_units(out)
     for res in out:
         o = res["offers"][0] if res["offers"] else None

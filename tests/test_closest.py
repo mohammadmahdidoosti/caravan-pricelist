@@ -338,3 +338,16 @@ def test_catalog_code_the_picture_skipped_becomes_a_row(monkeypatch):
     # the same loop as in _check_with_text, on its own
     extra = [c for c, (p, _) in tables["a.pdf ص1"].items() if c not in used["a.pdf ص1"]]
     assert extra == ["3401"]
+
+
+def test_extra_word_in_row_name_is_another_product():
+    from pl.match import _word_guard
+    by_id = {"1": {"name": "لوله تک لایه سایز ۲۰ روکا گستر", "brand": "روکا گستر"},
+             "2": {"name": "سه راهی (ساده) سایز ۲۰ روکا گستر", "brand": "روکا گستر"},
+             "3": {"name": "مهره ماسوره دوسرجوش سایز ۲۰ روکا گستر", "brand": "روکا گستر"}}
+    out = [{"name": "لوله تک لایه (نازک) PP-RCT 20", "how": "name", "status": "green", "offers": [{"offer_id": 1}], "cands": []},
+           {"name": "سه راهی 20", "how": "name", "status": "green", "offers": [{"offer_id": 2}], "cands": []},
+           {"name": "مهره ماسوره دو سر جوش اندازه 20", "how": "name", "status": "green", "offers": [{"offer_id": 3}], "cands": []}]
+    _word_guard(out, by_id, list(by_id.values()) + [{"name": "لوله سه لایه"}, {"name": "سه راهی فلزی"}])
+    assert not out[0]["offers"] and "نازک" in out[0]["note"]
+    assert out[1]["offers"] and out[2]["offers"]
