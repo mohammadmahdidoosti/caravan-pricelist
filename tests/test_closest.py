@@ -280,3 +280,10 @@ def test_table_code_with_dropped_zero_takes_text_price(tmp_path):
     assert rows[1]["price"] == "2,198,084" and "PDF" in rows[1]["check"]
     assert rows[2]["model"] == "4203"
     assert rows[3]["price"] == "1,700,000"               # no price printed for 2413: nothing taken from 2411
+
+
+def test_side_by_side_tables_are_not_read_as_text():
+    from pl.read import side_by_side
+    two = "\n".join(f"1,{i:03d},000  50  20  {4000 + i}    2,{i:03d},000  25  63  {2400 + i}" for i in range(10))
+    one = "\n".join(f"21377{i:02d}  10  12/108  19,{i:03d},000  ETIMAT 10 C 32A" for i in range(10))
+    assert side_by_side(two) and not side_by_side(one)

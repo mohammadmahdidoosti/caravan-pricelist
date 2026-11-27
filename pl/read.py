@@ -456,6 +456,14 @@ def pdf_text_pages(f: Path) -> dict[int, str]:
     return out
 
 
+def side_by_side(text: str) -> bool:
+    """A page whose priced lines mostly carry two or more prices: tables printed next to each other."""
+    priced = [len(re.findall(r"(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])", ln.translate(FA_DIGITS).replace("٬", ",")))
+              for ln in text.splitlines()]
+    priced = [n for n in priced if n]
+    return bool(priced) and sum(1 for n in priced if n >= 2) >= 0.3 * len(priced)
+
+
 def sheet_text(f: Path, max_rows: int = 600) -> str:
     vals, _ = _grid(f)
     lines = []
@@ -536,6 +544,9 @@ def read_files(files: list[Path], unit_hint: str = "auto", progress=None) -> dic
                         failed.append(f"{f.name}: {bad} تکه خوانده نشد")
                 continue
             text_pages = pdf_text_pages(f) if low.endswith(".pdf") else {}
+            # (27 Nov, روکا گستر) two price tables printed side by side share each text line: read as text, a row
+            # took its neighbour's name. Such pages are read as pictures; their prices still come from the text.
+            text_pages = {k: v for k, v in text_pages.items() if not side_by_side(v)}
             chunks = [(f"{f.name} ص{pno}", text[i:i + 8000]) for pno, text in text_pages.items() for i in range(0, len(text), 8000)]
             with ThreadPoolExecutor(4) as ex:
                 for (label, _t), (got, c, n, bad) in zip(chunks, ex.map(lambda x: _read_text(x[1], x[0]), chunks)):
