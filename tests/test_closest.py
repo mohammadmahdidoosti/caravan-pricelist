@@ -326,3 +326,15 @@ def test_misread_code_with_common_size_needs_its_price():
     assert _table_price(t, "691", "شیر تکضرب 20", 7110857) == ("6401", 7110857)
     assert _table_price(t, "691", "شیر تکضرب 20", 7110000) is None
     assert _table_price(t, "6301", "سه راهی 20*1/2", 123) is None
+
+
+def test_catalog_code_the_picture_skipped_becomes_a_row(monkeypatch):
+    import pl.read as rd
+    text = "\n".join(f"{100 + i},000 10 20 {1001 + 2 * i}" for i in range(6)) + "\n535,211 120 20 3401"
+    rows = [{"model": str(1001 + 2 * i), "name": "بوشن 20", "price": f"{100 + i},000", "file": "a.pdf ص1", "brand": "X"}
+            for i in range(6)]
+    tables = {"a.pdf ص1": rd._table_codes(text)}
+    used = {"a.pdf ص1": {r["model"] for r in rows}}
+    # the same loop as in _check_with_text, on its own
+    extra = [c for c, (p, _) in tables["a.pdf ص1"].items() if c not in used["a.pdf ص1"]]
+    assert extra == ["3401"]

@@ -903,10 +903,13 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
         except Exception as e:                           # noqa: BLE001
             log.warning("text check %s: %s", f.name, e)
             continue
+    used: dict[str, set] = {}
     for r in rows:
         nums = texts.get(r.get("file", ""))
         if not nums:
             continue
+        if re.fullmatch(r"\d{3,6}", str(r.get("model") or "").strip()):
+            used.setdefault(r.get("file", ""), set()).add(str(r.get("model")).strip())
         raw = re.sub(r"\D", "", str(r.get("price") or "").translate(FA_DIGITS))
         code = str(r.get("model") or "").strip()
         if raw and len(code) >= 5 and re.search(r"\d", code) and r.get("file") in pages:
@@ -926,6 +929,7 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
         hit = _table_price(tab, code, r.get("name", ""), int(raw)) if tab else None
         if hit:
             printed, got = hit
+            used.setdefault(r.get("file", ""), set()).add(printed)
             if printed != code:
                 r["model"] = printed                     # the code as the catalog prints it
             if int(raw) != got:
@@ -942,6 +946,22 @@ def _check_with_text(files: list[Path], rows: list[dict], unit_hint: str) -> Non
             continue
         if raw and int(raw) not in nums and int(raw) * 10 not in nums and int(raw) // 10 not in nums:
             r["check"] = "قیمت خوانده‌شده در متن صفحه پیدا نشد؛ بررسی کنید"
+    # (27 Nov) The catalog comes first: «سه راهی سه کنج» 3401 and 3403 are printed with their prices in the text
+    # and the picture reading skipped them. A priced code of a code table that no row took becomes a row of its
+    # own, to be named by a person.
+    for label, tab in tables.items():
+        if not isinstance(tab, dict) or len(used.get(label, ())) < 5:
+            continue
+        brands = [r.get("brand") for r in rows if r.get("file") == label and r.get("brand")]
+        brand = max(set(brands), key=brands.count) if brands else ""
+        seen = {re.sub(r"\D", "", str(r.get("price") or "").translate(FA_DIGITS)) for r in rows if r.get("file") == label}
+        for code, (price, size) in tab.items():
+            if code in used[label] or str(price) in seen:
+                continue                                 # a row with this price is this code, read wrong
+            sz = size.split()[-1] if size.split() else ""
+            rows.append({"brand": brand, "model": code, "name": f"کد {code}" + (f" سایز {sz}" if sz and sz != "-" else ""),
+                         "price": f"{price:,}", "file": label,
+                         "check": "این کد در متن کاتالوگ قیمت دارد ولی از روی تصویر خوانده نشد؛ اسمش را از کاتالوگ بنویسید"})
     for pdf in docs:
         try:
             pdf.close()
