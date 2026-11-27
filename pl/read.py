@@ -797,30 +797,37 @@ def _table_codes(text: str) -> dict[str, tuple[int, str]]:
     line: each short code (3-6 digits) with the comma-grouped price just before it and the cell's size."""
     out: dict[str, tuple[int, str]] = {}
     code_re = re.compile(r"\d{3,6}")
+    num = re.compile(r"[\d*/.]+")
     for line in text.splitlines():
         tok = line.translate(FA_DIGITS).replace("٬", ",").split()
-        at = [i for i, w in enumerate(tok) if _PRICE_TOK.fullmatch(w)]
-        for n, i in enumerate(at):
-            # «price count size code»: the cell runs to the next price; its last token is the code. A count is
-            # also 3 digits (300 pieces), so the code is the cell's last token, never any 3-digit number in it.
-            end = at[n + 1] if n + 1 < len(at) else len(tok)
-            cell = tok[i + 1:end]
-            if len(cell) >= 2 and code_re.fullmatch(cell[-1]):
-                code, mid = cell[-1], cell[:-1]
-            elif i == len(tok) - 1:
-                # the same cell printed the other way round, «code size count price» (a line that starts with
-                # a header): the code is the first number of the run before the price
-                k = i
-                while k > 0 and re.fullmatch(r"[\d*/.]+", tok[k - 1]) and (n == 0 or k - 1 > at[n - 1]):
-                    k -= 1
-                run = tok[k:i]
-                if len(run) < 2 or not code_re.fullmatch(run[0]):
-                    continue
-                code, mid = run[0], run[1:][::-1]
-            else:
+        for i, w in enumerate(tok):
+            if not _PRICE_TOK.fullmatch(w):
                 continue
+            # «price count size code»: the numbers after the price, up to a word, a dash or the next price.
+            # A count is 3 digits too (300 pieces) and the next cell may follow without a price («_»), so the
+            # code is the last 3-6 digit number among the cell's first four.
+            run = []
+            for t in tok[i + 1:]:
+                if _PRICE_TOK.fullmatch(t) or not num.fullmatch(t):
+                    break
+                run.append(t)
+            at = [k for k, t in enumerate(run[:4]) if code_re.fullmatch(t)]
+            if at and at[-1] >= 1:
+                code, mid = run[at[-1]], run[:at[-1]]
+            else:
+                # the same cell the other way round, «code size count price», with a word or the line's start
+                # before it (never another price: that is the previous cell's numbers)
+                k = i
+                while k > 0 and num.fullmatch(tok[k - 1]) and not _PRICE_TOK.fullmatch(tok[k - 1]):
+                    k -= 1
+                if k > 0 and _PRICE_TOK.fullmatch(tok[k - 1]):
+                    continue
+                back = tok[k:i]
+                if len(back) < 2 or not code_re.fullmatch(back[0]):
+                    continue
+                code, mid = back[0], back[1:][::-1]
             if code not in out:
-                out[code] = (int(tok[i].replace(",", "")), " ".join(mid))
+                out[code] = (int(w.replace(",", "")), " ".join(mid))
     return out
 
 

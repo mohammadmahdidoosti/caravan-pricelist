@@ -297,3 +297,14 @@ def test_table_cells_with_three_digit_counts():
     got = _table_codes(t)
     assert got["1001"][0] == 226233 and got["0001"][0] == 1856488
     assert got["1201"][0] == 199527 and got["0113"][0] == 38078640 and "1231" not in got
+
+
+def test_table_cells_end_at_words_and_missing_prices():
+    from pl.read import _table_codes
+    t = ("2,198,084 50 50 2409 فلزی زانو\n"
+         "2411 63 25 3,025,198 قیمت تعداد اندازه کد فلزی زانو\n"
+         "1,616,905 110 20*1/2 4001 15 75 2413\n"
+         "5,930,110 12 63 3011 2657774 72*1/2 441")
+    got = _table_codes(t)
+    assert got["2409"][0] == 2198084 and got["2411"][0] == 3025198
+    assert got["4001"][0] == 1616905 and "2413" not in got and got["3011"][0] == 5930110
