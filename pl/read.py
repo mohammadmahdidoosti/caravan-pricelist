@@ -796,17 +796,31 @@ def _table_codes(text: str) -> dict[str, tuple[int, str]]:
     """(27 Nov, روکا گستر) A price table printed as «price  count  size  code» cells, two tables side by side on one
     line: each short code (3-6 digits) with the comma-grouped price just before it and the cell's size."""
     out: dict[str, tuple[int, str]] = {}
+    code_re = re.compile(r"\d{3,6}")
     for line in text.splitlines():
         tok = line.translate(FA_DIGITS).replace("٬", ",").split()
-        for i, w in enumerate(tok):
-            if not re.fullmatch(r"\d{3,6}", w) or w in out:
+        at = [i for i, w in enumerate(tok) if _PRICE_TOK.fullmatch(w)]
+        for n, i in enumerate(at):
+            # «price count size code»: the cell runs to the next price; its last token is the code. A count is
+            # also 3 digits (300 pieces), so the code is the cell's last token, never any 3-digit number in it.
+            end = at[n + 1] if n + 1 < len(at) else len(tok)
+            cell = tok[i + 1:end]
+            if len(cell) >= 2 and code_re.fullmatch(cell[-1]):
+                code, mid = cell[-1], cell[:-1]
+            elif i == len(tok) - 1:
+                # the same cell printed the other way round, «code size count price» (a line that starts with
+                # a header): the code is the first number of the run before the price
+                k = i
+                while k > 0 and re.fullmatch(r"[\d*/.]+", tok[k - 1]) and (n == 0 or k - 1 > at[n - 1]):
+                    k -= 1
+                run = tok[k:i]
+                if len(run) < 2 or not code_re.fullmatch(run[0]):
+                    continue
+                code, mid = run[0], run[1:][::-1]
+            else:
                 continue
-            for j in range(i - 1, max(-1, i - 5), -1):
-                if _PRICE_TOK.fullmatch(tok[j]):
-                    out[w] = (int(tok[j].replace(",", "")), " ".join(tok[j + 1:i]))
-                    break
-                if j < i - 1 and re.fullmatch(r"\d{3,6}", tok[j]):
-                    break                                # another cell's code: this code has no price of its own
+            if code not in out:
+                out[code] = (int(tok[i].replace(",", "")), " ".join(mid))
     return out
 
 

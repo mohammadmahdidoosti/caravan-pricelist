@@ -287,3 +287,13 @@ def test_side_by_side_tables_are_not_read_as_text():
     two = "\n".join(f"1,{i:03d},000  50  20  {4000 + i}    2,{i:03d},000  25  63  {2400 + i}" for i in range(10))
     one = "\n".join(f"21377{i:02d}  10  12/108  19,{i:03d},000  ETIMAT 10 C 32A" for i in range(10))
     assert side_by_side(two) and not side_by_side(one)
+
+
+def test_table_cells_with_three_digit_counts():
+    from pl.read import _table_codes
+    t = ("226,233 300 20 1001 1,856,488 30 20 0001\n"
+         "قیمت شاخه اندازه کد لوله 1201 20*25 350 199,527\n"
+         "_ 25 75*63 1231 38,078,640 3 75 0113")
+    got = _table_codes(t)
+    assert got["1001"][0] == 226233 and got["0001"][0] == 1856488
+    assert got["1201"][0] == 199527 and got["0113"][0] == 38078640 and "1231" not in got
