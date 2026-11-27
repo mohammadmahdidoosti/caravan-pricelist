@@ -461,7 +461,7 @@ def side_by_side(text: str) -> bool:
     priced = [len(re.findall(r"(?<![\d,])\d{1,3}(?:,\d{3})+(?![\d,])", ln.translate(FA_DIGITS).replace("٬", ",")))
               for ln in text.splitlines()]
     priced = [n for n in priced if n]
-    return bool(priced) and sum(1 for n in priced if n >= 2) >= 0.3 * len(priced)
+    return bool(priced) and sum(1 for n in priced if n >= 2) >= 0.2 * len(priced)
 
 
 def sheet_text(f: Path, max_rows: int = 600) -> str:
